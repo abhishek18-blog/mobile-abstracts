@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Abstracts Mobile",
+    "slug": "abstracts-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "This app requires access to your photo library so you can set your profile picture."
+      }
+    },
+    "android": {
+      "package": "com.abstracts.researchhub",
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "This app requires access to your photo library so you can set your profile picture."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c81e5673-8629-4bd7-a671-2591d968d212"
+      }
+    }
+  }
+}
