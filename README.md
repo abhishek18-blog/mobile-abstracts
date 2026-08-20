@@ -67,3 +67,4 @@ npm run dev
 <div align="center">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=1e40af&height=100&section=footer" alt="Footer" />
 </div>  
+# mobile-abstracts
