@@ -45,11 +45,11 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [apiSource, setApiSource] = useState<string>('');
-  
+
   // Setup interest states (for skipped onboarding)
   const [availableInterests, setAvailableInterests] = useState<string[]>(AVAILABLE_INTERESTS);
   const [setupInterests, setSetupInterests] = useState<string[]>([]);
-  
+
   // Custom topic modal state
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
   const [customText, setCustomText] = useState('');
@@ -207,8 +207,8 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
                 autoFocus
               />
               <View style={styles.modalBtns}>
-                <TouchableOpacity 
-                  style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]} 
+                <TouchableOpacity
+                  style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
                   onPress={() => {
                     setIsCustomModalOpen(false);
                     setCustomText('');
@@ -216,8 +216,8 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
                 >
                   <Text style={{ color: colors.text, fontWeight: '600' }}>Cancel</Text>
                 </TouchableOpacity>
-                <TouchableOpacity 
-                  style={[styles.modalBtn, { backgroundColor: colors.primary }]} 
+                <TouchableOpacity
+                  style={[styles.modalBtn, { backgroundColor: colors.primary }]}
                   onPress={() => {
                     const val = customText.trim();
                     if (!val) return;
@@ -310,12 +310,12 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
           keyExtractor={(item: Paper) => item.id}
           ListHeaderComponent={ListHeader}
           renderItem={({ item }: { item: Paper }) => (
-            <PaperCard 
-              paper={item} 
+            <PaperCard
+              paper={item}
               onPress={() => {
                 cachePapers([item]);
                 onSelectPaper(item.id);
-              }} 
+              }}
               onToggleSave={() => handleToggleSave(item.id)}
             />
           )}
@@ -466,7 +466,7 @@ const styles = StyleSheet.create({
   // Modal styling
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(255, 0, 0, 0.6)',//'rgba(0,0,0,0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,

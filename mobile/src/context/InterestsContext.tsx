@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth } from './AuthContext';
 
 interface InterestsContextType {
   interests: string[];
@@ -69,6 +70,20 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [interests, setInterests] = useState<string[]>([]);
   const [hasSelected, setHasSelected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
+  const { user, token } = useAuth(); // Now accessible because AuthProvider is higher in the tree
+
+  // Sync state whenever the authenticated user changes (e.g. after login)
+  useEffect(() => {
+    const syncUserInterests = async () => {
+      if (user && user.interests && user.interests.length > 0) {
+        setInterests(user.interests);
+        setHasSelected(true);
+        await AsyncStorage.setItem('user_interests', JSON.stringify(user.interests));
+        await AsyncStorage.setItem('user_interests_selected', 'true');
+      }
+    };
+    syncUserInterests();
+  }, [user]);
 
   useEffect(() => {
     const load = async () => {
@@ -102,8 +117,13 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setLoading(false);
       }
     };
-    load();
-  }, []);
+    // Only load if not already set by the user sync effect
+    if (!user || !user.interests || user.interests.length === 0) {
+      load();
+    } else {
+      setLoading(false);
+    }
+  }, [user]);
 
   const saveInterests = async (newInterests: string[]) => {
     // Allow 1 to 4 interests (not exactly 4)

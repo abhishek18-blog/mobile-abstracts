@@ -12,15 +12,15 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <InterestsProvider>
-          <SearchProvider>
-            <PaperProvider>
-              <AuthProvider>
+        <AuthProvider>
+          <InterestsProvider>
+            <SearchProvider>
+              <PaperProvider>
                 <AppNavigator />
-              </AuthProvider>
-            </PaperProvider>
-          </SearchProvider>
-        </InterestsProvider>
+              </PaperProvider>
+            </SearchProvider>
+          </InterestsProvider>
+        </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

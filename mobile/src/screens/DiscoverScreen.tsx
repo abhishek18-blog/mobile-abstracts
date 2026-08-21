@@ -33,6 +33,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
     searchQuery,
     setSearchQuery,
     papers,
+    setPapers,
     selectedSort,
     setSelectedSort,
     viewMode,
@@ -148,8 +149,8 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           </View>
 
           {/* Call to Action Button */}
-          <TouchableOpacity 
-            style={[styles.actionBtn, { backgroundColor: colors.primary }]} 
+          <TouchableOpacity
+            style={[styles.actionBtn, { backgroundColor: colors.primary }]}
             onPress={() => handleOpenProjectSelector(item)}
           >
             <FolderPlus size={18} color="#ffffff" />
@@ -184,14 +185,14 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           <View style={styles.filterRow}>
             <TouchableOpacity
               style={[
-                styles.filterChip, 
+                styles.filterChip,
                 { backgroundColor: colors.card, borderColor: colors.border },
                 selectedSort === 'most_cited' && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
               ]}
               onPress={() => setSelectedSort('most_cited')}
             >
               <Text style={[
-                styles.filterChipText, 
+                styles.filterChipText,
                 { color: colors.textMuted },
                 selectedSort === 'most_cited' && { color: colors.primary, fontWeight: '700' }
               ]}>
@@ -201,14 +202,14 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
 
             <TouchableOpacity
               style={[
-                styles.filterChip, 
+                styles.filterChip,
                 { backgroundColor: colors.card, borderColor: colors.border },
                 selectedSort === 'most_recent' && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
               ]}
               onPress={() => setSelectedSort('most_recent')}
             >
               <Text style={[
-                styles.filterChipText, 
+                styles.filterChipText,
                 { color: colors.textMuted },
                 selectedSort === 'most_recent' && { color: colors.primary, fontWeight: '700' }
               ]}>
@@ -219,14 +220,14 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
 
           {/* View Mode Icons */}
           <View style={[styles.toggleWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <TouchableOpacity 
-              style={[styles.toggleBtn, viewMode === 'list' && { backgroundColor: colors.background }]} 
+            <TouchableOpacity
+              style={[styles.toggleBtn, viewMode === 'list' && { backgroundColor: colors.background }]}
               onPress={() => setViewMode('list')}
             >
               <LayoutList size={16} color={viewMode === 'list' ? colors.primary : colors.textMuted} />
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={[styles.toggleBtn, viewMode === 'swipe' && { backgroundColor: colors.background }]} 
+            <TouchableOpacity
+              style={[styles.toggleBtn, viewMode === 'swipe' && { backgroundColor: colors.background }]}
               onPress={() => setViewMode('swipe')}
             >
               <BookCopy size={16} color={viewMode === 'swipe' ? colors.primary : colors.textMuted} />
@@ -269,7 +270,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                 {searchQuery.length === 0 ? 'Search for research' : 'No papers found'}
               </Text>
               <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                {searchQuery.length === 0 
+                {searchQuery.length === 0
                   ? 'Type in the search bar above to discover interesting research papers.'
                   : 'Try adjusting your search terms or filters to find papers.'}
               </Text>
@@ -295,7 +296,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                   {searchQuery.length === 0 ? 'Search for research' : 'No papers found'}
                 </Text>
                 <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                  {searchQuery.length === 0 
+                  {searchQuery.length === 0
                     ? 'Type in the search bar above to discover interesting research papers.'
                     : 'Try adjusting your search terms or filters to find papers.'}
                 </Text>
@@ -553,7 +554,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   actionBtnText: {
-    color: '#ffffff',
+    color: '#000000',
     fontSize: 14,
     fontWeight: '700',
     marginLeft: 6,

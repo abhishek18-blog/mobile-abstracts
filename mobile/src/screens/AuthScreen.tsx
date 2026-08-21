@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import {
   ScrollView,
   Image,
   Modal,
+  Linking,
 } from 'react-native';
-import { LogIn, UserPlus, ArrowLeft, X, Check, Mail, ShieldCheck } from 'lucide-react-native';
+import { LogIn, UserPlus, ArrowLeft, X, Check, Mail, ShieldCheck, UserCheck } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { DEFAULT_API_URL } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
@@ -38,30 +39,87 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [selectedPresetEmail, setSelectedPresetEmail] = useState<string | null>(null);
 
-  // Preset accounts for quick one-tap Google Sign-In
+  // Accounts list based on user context
   const presetGoogleAccounts = [
     {
-      name: 'Google Account',
-      email: email ? email : 'user@gmail.com',
-      avatar: 'https://lh3.googleusercontent.com/a/default-user',
-    },
-    {
-      name: 'Abhishek (Research)',
-      email: 'abhishek.researcher@gmail.com',
-      avatar: 'https://lh3.googleusercontent.com/a/default-user',
-    },
+      name: 'Abhishek',
+      email: 'abhishek.des674@gmail.com',
+      note: 'Web Authorized User',
+    }
   ];
 
+  // Listen for deep links
+  useEffect(() => {
+    const handleUrlEvent = (event: { url: string }) => {
+      handleDeepLink(event.url);
+    };
+
+    const subscription = Linking.addEventListener('url', handleUrlEvent);
+
+    Linking.getInitialURL().then((initialUrl) => {
+      if (initialUrl) {
+        handleDeepLink(initialUrl);
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
+
+  const handleDeepLink = async (url: string) => {
+    try {
+      if (url.includes('email=')) {
+        const params = new URLSearchParams(url.split('?')[1]);
+        const returnedEmail = params.get('email');
+        if (returnedEmail) {
+          executeGoogleLogin(returnedEmail);
+        }
+      }
+    } catch (e) {
+      console.warn('Deep link handling error:', e);
+    }
+  };
+
+  // Forgot Password
+  const handleForgotPassword = async () => {
+    if (!email) {
+      Alert.alert('Email Required', 'Please enter your email address to reset your password.');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await fetch(`${DEFAULT_API_URL}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim() }),
+      });
+      const json = await response.json();
+      if (response.ok && json.success) {
+        Alert.alert('Success', json.message || 'If this email is registered, a reset link has been sent.');
+      } else {
+        throw new Error(json.error || 'Failed to process forgot password request.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Password / Standard Email Sign In / Register
   const handleSubmit = async () => {
     if (!email || !password) {
-      Alert.alert('Missing fields', 'Please enter email and password.');
+      Alert.alert('Missing fields', 'Please enter both your email and password.');
       return;
     }
 
     setLoading(true);
     try {
       const endpoint = isRegister ? '/auth/register' : '/auth/login';
-      const body = isRegister ? { name, email, password } : { email, password };
+      const cleanEmail = email.trim();
+      const body = isRegister ? { name, email: cleanEmail, password } : { email: cleanEmail, password };
 
       const response = await fetch(`${DEFAULT_API_URL}${endpoint}`, {
         method: 'POST',
@@ -72,13 +130,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
       const json = await response.json();
 
       if (!response.ok) {
-        throw new Error(json.error || 'Authentication failed');
+        throw new Error(json.error || 'Invalid credentials or account does not exist.');
       }
 
       if (json.token && json.user) {
         await login(json.token, json.user);
       } else {
-        throw new Error('Invalid response structure');
+        throw new Error('Invalid response structure from server.');
       }
     } catch (err: any) {
       Alert.alert('Authentication Error', err.message || 'Server error');
@@ -87,96 +145,48 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
     }
   };
 
-  // Perform actual Google authentication for the selected email address
+  // Google Sign-In: Verifies MongoDB record for email and signs user in directly
   const executeGoogleLogin = async (targetEmail: string) => {
     if (!targetEmail || !targetEmail.includes('@')) {
-      Alert.alert('Invalid Email', 'Please enter a valid Google email address.');
+      Alert.alert('Invalid Email', 'Please select or enter a valid Google email address.');
       return;
     }
 
     setGoogleLoading(true);
     const displayName = targetEmail.split('@')[0].replace('.', ' ');
     const formattedName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
-    const googlePassword = `GoogleAuth#${targetEmail.replace(/[^a-zA-Z0-9]/g, '')}`;
 
     try {
-      // 1. Attempt login with target Google email
-      const loginRes = await fetch(`${DEFAULT_API_URL}/auth/login`, {
+      // 1. Send Google Mobile Auth request to check MongoDB database for existing authorized account
+      const response = await fetch(`${DEFAULT_API_URL}/auth/google-mobile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: targetEmail,
-          password: googlePassword,
-        }),
-      });
-
-      const loginJson = await loginRes.json();
-
-      if (loginRes.ok && loginJson.token && loginJson.user) {
-        setShowGoogleModal(false);
-        await login(loginJson.token, loginJson.user);
-        return;
-      }
-
-      // 2. If user doesn't exist yet, auto-register account under Google OAuth profile
-      const registerRes = await fetch(`${DEFAULT_API_URL}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: formattedName || 'Google User',
-          email: targetEmail,
-          password: googlePassword,
-          role: 'Researcher',
+          email: targetEmail.trim(),
+          name: formattedName,
           avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=2563eb&color=fff`,
         }),
       });
 
-      const registerJson = await registerRes.json();
+      const json = await response.json();
 
-      if (registerRes.ok && registerJson.token && registerJson.user) {
+      if (response.ok && json.success && json.token && json.user) {
         setShowGoogleModal(false);
-        await login(registerJson.token, registerJson.user);
-      } else {
-        // Fallback: If server returned an error (e.g. user exists with different pass), try logging in with standard password
-        const retryRes = await fetch(`${DEFAULT_API_URL}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: targetEmail,
-            password: 'password123',
-          }),
-        });
+        await login(json.token, json.user);
+        return;
+      }
 
-        const retryJson = await retryRes.json();
-        if (retryRes.ok && retryJson.token && retryJson.user) {
-          setShowGoogleModal(false);
-          await login(retryJson.token, retryJson.user);
-        } else {
-          // Fallback direct login creation
-          const fallbackUser = {
-            _id: `google_${Date.now()}`,
-            name: formattedName,
-            email: targetEmail,
-            role: 'Researcher',
-            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=2563eb&color=fff`,
-            interests: ['Machine Learning', 'AI'],
-          };
-          setShowGoogleModal(false);
-          await login(`google_jwt_${Date.now()}`, fallbackUser);
-        }
+      // 2. If it fails, throw error directly so we don't create dummy users
+      if (!response.ok) {
+        throw new Error(json.error || 'Server rejected the login request');
       }
     } catch (err: any) {
-      // Direct authenticated session fallback if network has issues
-      const fallbackUser = {
-        _id: `google_${Date.now()}`,
-        name: formattedName,
-        email: targetEmail,
-        role: 'Researcher',
-        avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=2563eb&color=fff`,
-        interests: ['Machine Learning', 'AI'],
-      };
-      setShowGoogleModal(false);
-      await login(`google_jwt_${Date.now()}`, fallbackUser);
+      // Remove fallback session login so user sees the real error
+      console.warn('Google Auth Error:', err);
+      Alert.alert(
+        'Google Login Failed',
+        err.message || 'Unable to connect to the backend server to verify your Google Account.'
+      );
     } finally {
       setGoogleLoading(false);
     }
@@ -215,7 +225,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>
               {isRegister
                 ? 'Fill in your details to get started.'
-                : 'Enter your credentials to access your account.'}
+                : 'Enter your email & password to access your account.'}
             </Text>
 
             {isRegister && (
@@ -256,6 +266,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
               />
             </View>
 
+            {!isRegister && (
+              <TouchableOpacity onPress={handleForgotPassword} style={{ alignSelf: 'flex-end', marginBottom: 16 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#2563eb' }}>Forgot Password?</Text>
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity
               style={styles.submitBtn}
               onPress={handleSubmit}
@@ -272,7 +288,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                     <LogIn size={18} color="#ffffff" style={styles.submitIcon} />
                   )}
                   <Text style={styles.submitBtnText}>
-                    {isRegister ? 'SIGN UP' : 'SIGN IN'}
+                    {isRegister ? 'SIGN UP WITH PASSWORD' : 'SIGN IN WITH PASSWORD'}
                   </Text>
                 </>
               )}
@@ -281,11 +297,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             {/* Divider */}
             <View style={styles.dividerContainer}>
               <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-              <Text style={[styles.dividerText, { color: colors.textMuted }]}>OR</Text>
+              <Text style={[styles.dividerText, { color: colors.textMuted }]}>OR GOOGLE AUTH</Text>
               <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
             </View>
 
-            {/* Continue with Google - Opens Google Account Picker */}
+            {/* Continue with Google */}
             <TouchableOpacity
               style={styles.googleBtn}
               onPress={() => setShowGoogleModal(true)}
@@ -315,7 +331,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Google Account Selector Modal */}
+      {/* Google Account Chooser Modal */}
       <Modal
         visible={showGoogleModal}
         transparent
@@ -337,7 +353,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                   style={{ width: 22, height: 22, marginRight: 10 }}
                 />
                 <Text style={[styles.modalTitle, { color: theme === 'dark' ? '#f4f4f5' : '#18181b' }]}>
-                  Choose a Google Account
+                  Google Account Sign In
                 </Text>
               </View>
               <TouchableOpacity
@@ -349,7 +365,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             </View>
 
             <Text style={[styles.modalSubtitle, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
-              Select an account to sign in directly to <Text style={{ fontWeight: '700', color: '#2563eb' }}>Abstracts</Text>:
+              Select or enter your authorized Google email to load your account records:
             </Text>
 
             {/* Account Selection List */}
@@ -384,6 +400,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                       <Text style={[styles.accountEmail, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
                         {acc.email}
                       </Text>
+                      <Text style={styles.accountNote}>{acc.note}</Text>
                     </View>
                     {isSelected && (
                       <View style={styles.checkBadge}>
@@ -398,13 +415,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             {/* Custom Google Email Input */}
             <View style={styles.customEmailBox}>
               <Text style={[styles.customEmailLabel, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
-                OR ENTER ANY GOOGLE EMAIL
+                OR ENTER YOUR AUTHORIZED GOOGLE EMAIL
               </Text>
               <View style={[styles.customInputWrapper, { backgroundColor: theme === 'dark' ? '#27272a' : '#f4f4f5' }]}>
                 <Mail size={18} color="#9ca3af" style={{ marginRight: 10 }} />
                 <TextInput
                   style={[styles.customInput, { color: theme === 'dark' ? '#ffffff' : '#000000' }]}
-                  placeholder="your.email@gmail.com"
+                  placeholder="e.g. abhishek.des674@gmail.com"
                   placeholderTextColor="#9ca3af"
                   keyboardType="email-address"
                   autoCapitalize="none"
@@ -431,9 +448,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                 <ActivityIndicator color="#ffffff" />
               ) : (
                 <>
-                  <ShieldCheck size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                  <UserCheck size={18} color="#ffffff" style={{ marginRight: 8 }} />
                   <Text style={styles.confirmGoogleBtnText}>
-                    Sign In with {googleEmailInput ? googleEmailInput.split('@')[0] : 'Google'}
+                    Sign In as {googleEmailInput ? googleEmailInput : 'Google User'}
                   </Text>
                 </>
               )}
@@ -541,13 +558,13 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   submitBtnText: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '800',
     color: '#ffffff',
-    letterSpacing: 1.5,
+    letterSpacing: 1,
   },
   submitIcon: {
-    marginRight: 10,
+    marginRight: 8,
   },
 
   // Divider
@@ -563,8 +580,8 @@ const styles = StyleSheet.create({
   dividerText: {
     fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 2,
-    marginHorizontal: 12,
+    letterSpacing: 1.5,
+    marginHorizontal: 10,
   },
 
   // Google Button
@@ -644,11 +661,11 @@ const styles = StyleSheet.create({
   },
   modalSubtitle: {
     fontSize: 13,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   accountsList: {
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   accountCard: {
     flexDirection: 'row',
@@ -679,6 +696,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  accountNote: {
+    fontSize: 10,
+    color: '#2563eb',
+    fontWeight: '700',
+    marginTop: 2,
+  },
   checkBadge: {
     width: 24,
     height: 24,
@@ -688,7 +711,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   customEmailBox: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   customEmailLabel: {
     fontSize: 10,
@@ -723,7 +746,7 @@ const styles = StyleSheet.create({
   },
   confirmGoogleBtnText: {
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '800',
   },
 });

@@ -91,10 +91,6 @@ export interface CommunityPost {
   created_at: string;
 }
 
-export interface ApiResponse<T> {
-  success: boolean;
-  data: T;
-  count?: number;
-  error?: string;
-  message?: string;
-}
+export type ApiResponse<T> =
+  | { success: true; data: T; count?: number; error?: string; message?: string }
+  | { success: false; error: string; data?: undefined; message?: string };

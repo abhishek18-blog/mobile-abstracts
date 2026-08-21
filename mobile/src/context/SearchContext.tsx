@@ -6,7 +6,7 @@ interface SearchContextType {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   papers: Paper[];
-  setPapers: (papers: Paper[]) => void;
+  setPapers: React.Dispatch<React.SetStateAction<Paper[]>>;
   selectedSort: 'most_cited' | 'most_recent';
   setSelectedSort: (sort: 'most_cited' | 'most_recent') => void;
   viewMode: 'list' | 'swipe';

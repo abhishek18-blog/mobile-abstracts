@@ -10,7 +10,10 @@ import {
   AbstractHighlight 
 } from '../types';
 
-export const DEFAULT_API_URL = 'https://abstracts-researchhub.onrender.com/api';
+// Automatically use local IP during development, and Render URL in production
+export const DEFAULT_API_URL = __DEV__ 
+  ? 'http://10.248.169.103:3001/api' 
+  : 'https://abstracts-researchhub.onrender.com/api';
 
 let currentApiUrl = DEFAULT_API_URL;
 
@@ -204,7 +207,7 @@ export const papersApi = {
     }
   },
 
-  getById: async (id: string) => {
+  getById: async (id: string): Promise<ApiResponse<Paper>> => {
     // 1. Check in-memory paper cache first
     if (paperCache.has(id)) {
       console.log(`[papersApi.getById] Found paper in cache for id: ${id}`);
@@ -283,8 +286,8 @@ export const searchApi = {
         citations: p.citations,
         abstract: p.abstract,
         source: 'OpenAlex',
-        url: p.source_url,
-        pdfUrl: p.pdf_url,
+        url: p.source_url || null,
+        pdfUrl: p.pdf_url || null,
         doi: null,
       }));
       return { success: true, data: converted };
@@ -550,7 +553,7 @@ export const projectsApi = {
 
 // ─── Community API ──────────────────────────────────────────────────────────
 export const communityApi = {
-  getAll: async () => {
+  getAll: async (): Promise<ApiResponse<Community[]>> => {
     try {
       return await request<Community[]>('/community');
     } catch {
@@ -558,7 +561,7 @@ export const communityApi = {
     }
   },
 
-  getById: async (id: string) => {
+  getById: async (id: string): Promise<ApiResponse<Community>> => {
     try {
       return await request<Community>(`/community/${id}`);
     } catch {
@@ -567,7 +570,7 @@ export const communityApi = {
     }
   },
 
-  join: async (id: string) => {
+  join: async (id: string): Promise<ApiResponse<{ isMember: boolean }>> => {
     try {
       return await request<{ isMember: boolean }>(`/community/${id}/join`, { method: 'POST' });
     } catch {
@@ -580,7 +583,7 @@ export const communityApi = {
     }
   },
 
-  create: async (data: { name: string; description?: string; subject: string; icon?: string }) => {
+  create: async (data: { name: string; description?: string; subject: string; icon?: string }): Promise<ApiResponse<Community>> => {
     try {
       return await request<Community>('/community', {
         method: 'POST',
@@ -602,7 +605,7 @@ export const communityApi = {
     }
   },
 
-  createPost: async (communityId: string, data: { content: string; paper_ids?: string[] }) => {
+  createPost: async (communityId: string, data: { content: string; paper_ids?: string[] }): Promise<ApiResponse<CommunityPost>> => {
     try {
       return await request<CommunityPost>(`/community/${communityId}/posts`, {
         method: 'POST',
@@ -617,13 +620,7 @@ export const communityApi = {
         author: { name: 'You (Researcher)', role: 'Contributor', avatar_initials: 'ME' },
         likes: 0,
         created_at: new Date().toISOString(),
-        papers: papersAttached.map(p => ({
-          id: p.id,
-          title: p.title,
-          authors: p.authors,
-          year: p.year,
-          citations: p.citations
-        })),
+        papers: papersAttached,
       };
       if (comm) {
         comm.posts = comm.posts || [];
@@ -633,7 +630,7 @@ export const communityApi = {
     }
   },
 
-  deletePost: async (communityId: string, postId: string) => {
+  deletePost: async (communityId: string, postId: string): Promise<ApiResponse<any>> => {
     try {
       return await request<any>(`/community/${communityId}/posts/${postId}`, {
         method: 'DELETE',

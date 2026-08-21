@@ -2,6 +2,7 @@
   "expo": {
     "name": "Abstracts Mobile",
     "slug": "abstracts-mobile",
+    "scheme": "abstractsmobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -17,6 +18,8 @@
     "android": {
       "package": "com.abstracts.researchhub",
       "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
         "READ_MEDIA_IMAGES"

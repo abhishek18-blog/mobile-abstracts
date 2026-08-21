@@ -158,7 +158,7 @@ export const PaperDetailModalScreen: React.FC<PaperDetailModalProps> = ({ paperI
                       style={[
                         styles.progressChipText,
                         { color: colors.textMuted },
-                        readingProgress === pct && { color: '#ffffff' },
+                        readingProgress === pct && { color: '#000000' },
                       ]}
                     >
                       {pct}%
@@ -200,7 +200,7 @@ export const PaperDetailModalScreen: React.FC<PaperDetailModalProps> = ({ paperI
             {/* Action Buttons */}
             <View style={styles.actionRow}>
               <TouchableOpacity style={[styles.pdfButton, { backgroundColor: colors.primary }]} onPress={handleOpenPdf}>
-                <ExternalLink size={18} color="#ffffff" />
+                <ExternalLink size={18} color="#000000" />
                 <Text style={styles.pdfButtonText}>Read PDF / View Source</Text>
               </TouchableOpacity>
             </View>
@@ -347,7 +347,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   pdfButtonText: {
-    color: '#ffffff',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '700',
     marginLeft: 8,
@@ -356,5 +356,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  FolderPlus: {
+    color: '#000000'
   },
 });
