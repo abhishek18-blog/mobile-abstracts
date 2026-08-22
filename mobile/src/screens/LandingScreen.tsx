@@ -17,6 +17,7 @@ import {
   Brain,
   Users,
 } from 'lucide-react-native';
+import { AbstractsLogo } from '../components/AbstractsLogo';
 
 const { width, height } = Dimensions.get('window');
 
@@ -87,21 +88,18 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
           {/* Header / Navbar - Matching Web Floating Navbar */}
           <View style={styles.navBar}>
             <View style={styles.navPill}>
-              {/* Brand Logo - Abs in dark navy, tracts in electric blue */}
-              <Text style={styles.brandText}>
-                <Text style={styles.brandAbs}>Abs</Text>
-                <Text style={styles.brandTracts}>tracts</Text>
-              </Text>
-              
+              {/* Brand Logo - Official SVG Logo */}
+              <AbstractsLogo width={100} height={36} textColor="#0f172a" primaryColor="#2563eb" />
+
               <View style={styles.navActions}>
-                <TouchableOpacity 
-                  onPress={onGuestAccess} 
+                <TouchableOpacity
+                  onPress={onGuestAccess}
                   activeOpacity={0.7}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Text style={styles.navGuestLink}>Explore as Guest</Text>
                 </TouchableOpacity>
-                
+
                 <TouchableOpacity
                   style={styles.signInBtn}
                   onPress={onGetStarted}
@@ -185,7 +183,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 <View style={styles.categoryBadge}>
                   <Text style={styles.categoryBadgeText}>Computer Science · AI</Text>
                 </View>
-                
+
                 <Text style={styles.paperTitle}>Attention Is All You Need</Text>
                 <Text style={styles.paperAuthors}>
                   Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit...
@@ -228,7 +226,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 glowColor="rgba(34, 211, 238, 0.08)"
               />
 
-              {/* Feature 2: AI Assistant */}
+              {/* Feature 2: AI Assistant
               <FeatureCard
                 icon={<Brain size={22} color="#e879f9" />}
                 title="AI Assistant"
@@ -236,7 +234,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
                 iconBg="rgba(168, 85, 247, 0.15)"
                 borderColor="rgba(168, 85, 247, 0.35)"
                 glowColor="rgba(232, 121, 249, 0.08)"
-              />
+              /> */}
 
               {/* Feature 3: Collaborative Hub */}
               <FeatureCard

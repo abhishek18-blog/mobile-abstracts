@@ -40,19 +40,27 @@ async function syncInterestsToServer(interests: string[], hasSelected: boolean) 
   }
 }
 
-// Helper to load interests from the backend user profile
+// Helper to load interests from the backend user profile with timeout guard
 async function loadInterestsFromServer(): Promise<{ interests: string[]; hasSelected: boolean } | null> {
   try {
     const token = await AsyncStorage.getItem('token');
     if (!token) return null;
 
     const { DEFAULT_API_URL } = await import('../services/api');
+    
+    // Add 3-second timeout guard to prevent network hangs from blocking app startup
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
     const res = await fetch(`${DEFAULT_API_URL.replace(/\/api$/, '')}/api/user`, {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
+
     const json = await res.json();
     if (json.success && json.data) {
       return {
@@ -61,7 +69,7 @@ async function loadInterestsFromServer(): Promise<{ interests: string[]; hasSele
       };
     }
   } catch (err) {
-    console.warn('Failed to load interests from server:', err);
+    console.warn('Failed to load interests from server (falling back):', err);
   }
   return null;
 }
@@ -70,59 +78,70 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [interests, setInterests] = useState<string[]>([]);
   const [hasSelected, setHasSelected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const { user, token } = useAuth(); // Now accessible because AuthProvider is higher in the tree
+  const { user } = useAuth();
 
   // Sync state whenever the authenticated user changes (e.g. after login)
   useEffect(() => {
-    const syncUserInterests = async () => {
-      if (user && user.interests && user.interests.length > 0) {
+    if (user) {
+      if (user.interests && user.interests.length > 0) {
         setInterests(user.interests);
         setHasSelected(true);
-        await AsyncStorage.setItem('user_interests', JSON.stringify(user.interests));
-        await AsyncStorage.setItem('user_interests_selected', 'true');
+        AsyncStorage.setItem('user_interests', JSON.stringify(user.interests));
+        AsyncStorage.setItem('user_interests_selected', 'true');
+      } else if ((user as any).hasSelectedInterests) {
+        setHasSelected(true);
+        AsyncStorage.setItem('user_interests_selected', 'true');
       }
-    };
-    syncUserInterests();
+    }
   }, [user]);
 
   useEffect(() => {
+    let isMounted = true;
     const load = async () => {
       try {
-        // First try loading from server (source of truth)
-        const serverData = await loadInterestsFromServer();
-        if (serverData && (serverData.hasSelected || (serverData.interests && serverData.interests.length > 0))) {
-          setInterests(serverData.interests || []);
-          setHasSelected(true);
-          // Also cache locally
-          await AsyncStorage.setItem('user_interests', JSON.stringify(serverData.interests));
-          await AsyncStorage.setItem('user_interests_selected', 'true');
-        } else {
-          // Fall back to local storage (guest mode or offline)
-          const stored = await AsyncStorage.getItem('user_interests');
-          const flag = await AsyncStorage.getItem('user_interests_selected');
+        // Read local storage first for immediate instant startup
+        const stored = await AsyncStorage.getItem('user_interests');
+        const flag = await AsyncStorage.getItem('user_interests_selected');
 
-          if (stored) {
+        if (stored) {
+          try {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length >= 1 && parsed.length <= 4) {
-              setInterests(parsed);
+              if (isMounted) setInterests(parsed);
             }
-          }
-          if (flag === 'true') {
-            setHasSelected(true);
-          }
+          } catch {}
         }
+        if (flag === 'true') {
+          if (isMounted) setHasSelected(true);
+        }
+
+        // Unblock UI immediately
+        if (isMounted) setLoading(false);
+
+        // Background server revalidation if user is logged in
+        loadInterestsFromServer().then(async (serverData) => {
+          if (serverData && (serverData.hasSelected || (serverData.interests && serverData.interests.length > 0))) {
+            if (isMounted) {
+              setInterests(serverData.interests || []);
+              setHasSelected(true);
+            }
+            await AsyncStorage.setItem('user_interests', JSON.stringify(serverData.interests || []));
+            await AsyncStorage.setItem('user_interests_selected', 'true');
+          }
+        }).catch((err) => {
+          console.warn('[Interests] Background server sync warning:', err);
+        });
       } catch (err) {
         console.warn('Failed to load interests from storage:', err);
-      } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
-    // Only load if not already set by the user sync effect
-    if (!user || !user.interests || user.interests.length === 0) {
-      load();
-    } else {
-      setLoading(false);
-    }
+
+    load();
+
+    return () => {
+      isMounted = false;
+    };
   }, [user]);
 
   const saveInterests = async (newInterests: string[]) => {

@@ -1,0 +1,46 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="440dp"
+    android:height="110dp"
+    android:viewportWidth="440"
+    android:viewportHeight="110">
+
+    <!-- Abstracts Wordmark Paths ("Abs" in White / Dark & "tracts" in Primary Blue) -->
+    <group android:name="wordmark">
+        <!-- Letter 'A' -->
+        <path
+            android:pathData="M 20,85 L 38,20 L 56,85 L 46,85 L 41,67 L 25,67 L 20,85 Z M 28,56 L 38,31 L 48,56 Z"
+            android:fillColor="#FFFFFF"/>
+        <!-- Letter 'b' -->
+        <path
+            android:pathData="M 64,17 L 74,17 L 74,43 A 18,18 0 0,1 92,85 L 64,85 Z M 74,55 L 82,55 A 10,10 0 0,1 82,75 L 74,75 Z"
+            android:fillColor="#FFFFFF"/>
+        <!-- Letter 's' -->
+        <path
+            android:pathData="M 98,73 C 98,81 105,85 114,85 C 123,85 130,80 130,72 C 130,61 116,58 112,54 C 108,51 107,48 107,45 C 107,39 112,35 119,35 C 126,35 130,39 131,45 L 139,45 C 138,35 130,28 119,28 C 108,28 99,34 99,44 C 99,54 113,57 117,61 C 122,64 123,67 123,71 C 123,76 117,79 111,79 C 104,79 99,74 98,73 Z"
+            android:fillColor="#FFFFFF"/>
+        <!-- Letter 't' -->
+        <path
+            android:pathData="M 148,29 L 148,40 L 140,40 L 140,48 L 148,48 L 148,75 C 148,81 152,85 159,85 L 164,85 L 164,77 L 160,77 C 157,77 156,75 156,72 L 156,48 L 164,48 L 164,40 L 156,40 L 156,29 Z"
+            android:fillColor="#2F6FED"/>
+        <!-- Letter 'r' -->
+        <path
+            android:pathData="M 170,40 L 178,40 L 178,47 A 12,12 0 0,1 190,40 L 194,40 L 194,49 L 188,49 C 182,49 178,53 178,60 L 178,85 L 170,85 Z"
+            android:fillColor="#2F6FED"/>
+        <!-- Letter 'a' -->
+        <path
+            android:pathData="M 200,63 C 200,48 210,40 224,40 C 234,40 242,45 242,55 L 242,85 L 234,85 L 234,77 A 14,14 0 0,1 220,86 C 208,86 200,77 200,63 Z M 234,61 L 234,57 C 234,50 228,46 222,46 C 214,46 208,51 208,61 C 208,70 214,79 222,79 C 229,79 234,73 234,65 Z"
+            android:fillColor="#2F6FED"/>
+        <!-- Letter 'c' -->
+        <path
+            android:pathData="M 250,63 C 250,48 260,40 274,40 C 284,40 291,46 292,55 L 284,55 C 283,50 279,47 274,47 C 265,47 258,53 258,63 C 258,72 265,79 274,79 C 280,79 284,75 285,69 L 293,69 C 291,79 284,86 274,86 C 260,86 250,77 250,63 Z"
+            android:fillColor="#2F6FED"/>
+        <!-- Letter 't' -->
+        <path
+            android:pathData="M 304,29 L 304,40 L 296,40 L 296,48 L 304,48 L 304,75 C 304,81 308,85 315,85 L 320,85 L 320,77 L 316,77 C 313,77 312,75 312,72 L 312,48 L 320,48 L 320,40 L 312,40 L 312,29 Z"
+            android:fillColor="#2F6FED"/>
+        <!-- Letter 's' -->
+        <path
+            android:pathData="M 326,73 C 326,81 333,85 342,85 C 351,85 358,80 358,72 C 358,61 344,58 340,54 C 336,51 335,48 335,45 C 335,39 340,35 347,35 C 354,35 358,39 359,45 L 367,45 C 366,35 358,28 347,28 C 336,28 327,34 327,44 C 327,54 341,57 345,61 C 350,64 351,67 351,71 C 351,76 345,79 339,79 C 332,79 327,74 326,73 Z"
+            android:fillColor="#2F6FED"/>
+    </group>
+</vector>

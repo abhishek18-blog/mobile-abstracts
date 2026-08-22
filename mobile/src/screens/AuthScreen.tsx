@@ -17,8 +17,51 @@ import {
 } from 'react-native';
 import { LogIn, UserPlus, ArrowLeft, X, Check, Mail, ShieldCheck, UserCheck } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
-import { DEFAULT_API_URL } from '../services/api';
+import { DEFAULT_API_URL, setCustomApiUrl } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
+import { AbstractsLogo } from '../components/AbstractsLogo';
+
+// Candidate URLs to attempt in sequence if primary URL network fails
+const getCandidateApiUrls = (): string[] => {
+  const list: string[] = [DEFAULT_API_URL];
+  if (__DEV__) {
+    const androidEmulatorUrl = 'http://10.0.2.2:3001/api';
+    const localhostUrl = 'http://localhost:3001/api';
+    if (!list.includes(androidEmulatorUrl)) list.push(androidEmulatorUrl);
+    if (!list.includes(localhostUrl)) list.push(localhostUrl);
+  }
+  const renderUrl = 'https://abstracts-researchhub.onrender.com/api';
+  if (!list.includes(renderUrl)) list.push(renderUrl);
+  return list;
+};
+
+const fetchAuthWithFallback = async (endpoint: string, options: RequestInit): Promise<Response> => {
+  const candidateUrls = getCandidateApiUrls();
+  let lastError: any = null;
+
+  for (const baseUrl of candidateUrls) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
+
+    try {
+      const response = await fetch(`${baseUrl}${endpoint}`, {
+        ...options,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      // If network connection succeeded, lock in this working API URL globally!
+      setCustomApiUrl(baseUrl);
+      return response;
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      lastError = err;
+      console.warn(`[Auth Fallback] Attempt to ${baseUrl}${endpoint} failed:`, err.message || err);
+    }
+  }
+
+  throw lastError || new Error('Unable to connect to any API backend server.');
+};
 
 interface AuthScreenProps {
   onBack?: () => void;
@@ -37,16 +80,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [googleEmailInput, setGoogleEmailInput] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [selectedPresetEmail, setSelectedPresetEmail] = useState<string | null>(null);
-
-  // Accounts list based on user context
-  const presetGoogleAccounts = [
-    {
-      name: 'Abhishek',
-      email: 'abhishek.des674@gmail.com',
-      note: 'Web Authorized User',
-    }
-  ];
 
   // Listen for deep links
   useEffect(() => {
@@ -90,7 +123,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
     
     setLoading(true);
     try {
-      const response = await fetch(`${DEFAULT_API_URL}/auth/forgot-password`, {
+      const response = await fetchAuthWithFallback('/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim() }),
@@ -121,7 +154,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
       const cleanEmail = email.trim();
       const body = isRegister ? { name, email: cleanEmail, password } : { email: cleanEmail, password };
 
-      const response = await fetch(`${DEFAULT_API_URL}${endpoint}`, {
+      const response = await fetchAuthWithFallback(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -148,7 +181,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   // Google Sign-In: Verifies MongoDB record for email and signs user in directly
   const executeGoogleLogin = async (targetEmail: string) => {
     if (!targetEmail || !targetEmail.includes('@')) {
-      Alert.alert('Invalid Email', 'Please select or enter a valid Google email address.');
+      Alert.alert('Invalid Email', 'Please enter a valid Google email address.');
       return;
     }
 
@@ -157,8 +190,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
     const formattedName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
     try {
-      // 1. Send Google Mobile Auth request to check MongoDB database for existing authorized account
-      const response = await fetch(`${DEFAULT_API_URL}/auth/google-mobile`, {
+      // Send Google Mobile Auth request with automated backend URL fallback
+      const response = await fetchAuthWithFallback('/auth/google-mobile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -176,12 +209,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
         return;
       }
 
-      // 2. If it fails, throw error directly so we don't create dummy users
       if (!response.ok) {
         throw new Error(json.error || 'Server rejected the login request');
       }
     } catch (err: any) {
-      // Remove fallback session login so user sees the real error
       console.warn('Google Auth Error:', err);
       Alert.alert(
         'Google Login Failed',
@@ -209,10 +240,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
 
           {/* Brand Header */}
           <View style={styles.logoContainer}>
-            <Text style={styles.brandTextLarge}>
-              <Text style={[styles.brandAbsLarge, { color: colors.text }]}>Abs</Text>
-              <Text style={styles.brandTractsLarge}>tracts</Text>
-            </Text>
+            <AbstractsLogo
+              width={220}
+              height={56}
+              textColor={colors.text}
+              primaryColor="#2563eb"
+            />
             <Text style={[styles.tagline, { color: colors.textMuted }]}>
               {isRegister ? 'Create your research profile' : 'Welcome back, researcher'}
             </Text>
@@ -365,71 +398,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             </View>
 
             <Text style={[styles.modalSubtitle, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
-              Select or enter your authorized Google email to load your account records:
+              Enter your Google Account email to load your research profile:
             </Text>
 
-            {/* Account Selection List */}
-            <View style={styles.accountsList}>
-              {presetGoogleAccounts.map((acc, idx) => {
-                const isSelected = selectedPresetEmail === acc.email;
-                return (
-                  <TouchableOpacity
-                    key={idx}
-                    style={[
-                      styles.accountCard,
-                      {
-                        backgroundColor: theme === 'dark' ? '#27272a' : '#f4f4f5',
-                        borderColor: isSelected ? '#2563eb' : 'transparent',
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedPresetEmail(acc.email);
-                      setGoogleEmailInput(acc.email);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.accountAvatar}>
-                      <Text style={styles.accountAvatarText}>
-                        {acc.email.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.accountName, { color: theme === 'dark' ? '#f4f4f5' : '#18181b' }]}>
-                        {acc.name}
-                      </Text>
-                      <Text style={[styles.accountEmail, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
-                        {acc.email}
-                      </Text>
-                      <Text style={styles.accountNote}>{acc.note}</Text>
-                    </View>
-                    {isSelected && (
-                      <View style={styles.checkBadge}>
-                        <Check size={14} color="#ffffff" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Custom Google Email Input */}
+            {/* Google Email Input */}
             <View style={styles.customEmailBox}>
               <Text style={[styles.customEmailLabel, { color: theme === 'dark' ? '#a1a1aa' : '#71717a' }]}>
-                OR ENTER YOUR AUTHORIZED GOOGLE EMAIL
+                GOOGLE ACCOUNT EMAIL
               </Text>
               <View style={[styles.customInputWrapper, { backgroundColor: theme === 'dark' ? '#27272a' : '#f4f4f5' }]}>
                 <Mail size={18} color="#9ca3af" style={{ marginRight: 10 }} />
                 <TextInput
                   style={[styles.customInput, { color: theme === 'dark' ? '#ffffff' : '#000000' }]}
-                  placeholder="e.g. abhishek.des674@gmail.com"
+                  placeholder="your.email@gmail.com"
                   placeholderTextColor="#9ca3af"
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={googleEmailInput}
-                  onChangeText={(text) => {
-                    setGoogleEmailInput(text);
-                    setSelectedPresetEmail(null);
-                  }}
+                  onChangeText={setGoogleEmailInput}
                 />
               </View>
             </View>
@@ -450,7 +436,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                 <>
                   <UserCheck size={18} color="#ffffff" style={{ marginRight: 8 }} />
                   <Text style={styles.confirmGoogleBtnText}>
-                    Sign In as {googleEmailInput ? googleEmailInput : 'Google User'}
+                    Sign In as {googleEmailInput ? googleEmailInput : 'Google Account'}
                   </Text>
                 </>
               )}

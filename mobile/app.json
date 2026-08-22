@@ -15,8 +15,13 @@
         "NSPhotoLibraryUsageDescription": "This app requires access to your photo library so you can set your profile picture."
       }
     },
+    "icon": "./logo/icon.svg",
     "android": {
       "package": "com.abstracts.researchhub",
+      "adaptiveIcon": {
+        "foregroundImage": "./logo/icon.svg",
+        "backgroundColor": "#090B10"
+      },
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE",

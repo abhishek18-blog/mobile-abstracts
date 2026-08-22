@@ -12,6 +12,7 @@ import { PaperDetailModalScreen } from '../screens/PaperDetailModalScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { LandingScreen } from '../screens/LandingScreen';
 import { OnboardingScreen } from '../screens/OnboardingScreen';
+import { SplashScreen } from '../screens/SplashScreen';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
@@ -21,6 +22,7 @@ type TabName = 'discover' | 'library' | 'foryou' | 'community' | 'settings';
 export const AppNavigator: React.FC = () => {
   const { token, isGuest, isLoading, enterGuestMode } = useAuth();
   const { hasSelected, loading: interestsLoading } = useInterests();
+  const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabName>('discover');
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
   const [showLanding, setShowLanding] = useState(true);
@@ -28,12 +30,9 @@ export const AppNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { theme, colors } = useTheme();
 
-  if (isLoading || interestsLoading) {
-    return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading Abstracts Mobile...</Text>
-      </View>
-    );
+  // Initial Splash Screen with Abstracts SVG Logo and Creative Animated Spinner
+  if (showSplash || isLoading || interestsLoading) {
+    return <SplashScreen onFinish={() => setShowSplash(false)} />;
   }
 
   // If user is not authenticated and not in guest mode

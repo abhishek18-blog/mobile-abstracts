@@ -27,18 +27,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const storedToken = await AsyncStorage.getItem('token');
         const storedGuest = await AsyncStorage.getItem('isGuest');
+        const storedProfile = await AsyncStorage.getItem('user_profile');
 
         if (storedToken) {
           setToken(storedToken);
-          try {
-            const profileRes = await userApi.getProfile();
-            if (profileRes.success) {
-              setUser(profileRes.data);
-            }
-          } catch {
-            await AsyncStorage.removeItem('token');
-            setToken(null);
+          if (storedProfile) {
+            try {
+              setUser(JSON.parse(storedProfile));
+            } catch {}
           }
+          // Set isLoading false immediately so app renders without waiting for network call
+          setIsLoading(false);
+
+          // Fetch fresh user profile in background
+          userApi.getProfile().then(async (profileRes) => {
+            if (profileRes.success && profileRes.data) {
+              setUser(profileRes.data);
+              await AsyncStorage.setItem('user_profile', JSON.stringify(profileRes.data));
+            }
+          }).catch(async (err: any) => {
+            if (err?.message?.includes('401')) {
+              await AsyncStorage.removeItem('token');
+              await AsyncStorage.removeItem('user_profile');
+              setToken(null);
+              setUser(null);
+            }
+          });
+          return;
         } else if (storedGuest === 'true') {
           setIsGuest(true);
         }
@@ -54,6 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (newToken: string, newUser: UserProfile) => {
     await AsyncStorage.setItem('token', newToken);
+    await AsyncStorage.setItem('user_profile', JSON.stringify(newUser));
     await AsyncStorage.removeItem('isGuest');
     setToken(newToken);
     setUser(newUser);
@@ -62,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     await AsyncStorage.removeItem('token');
+    await AsyncStorage.removeItem('user_profile');
     await AsyncStorage.removeItem('isGuest');
     setToken(null);
     setUser(null);
@@ -71,6 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const enterGuestMode = async () => {
     await AsyncStorage.setItem('isGuest', 'true');
     await AsyncStorage.removeItem('token');
+    await AsyncStorage.removeItem('user_profile');
     setIsGuest(true);
     setToken(null);
     setUser(null);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Moon, Sun, Layers, Plus, X, Camera, Trash2, Image as ImageIcon } from 'lucide-react-native';
+import { LogOut, Moon, Sun, Layers, Plus, X, Camera, Trash2, Image as ImageIcon, Check, UserCheck } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
@@ -48,6 +48,26 @@ export const SettingsScreen: React.FC = () => {
   });
   
   const [selectedInterests, setSelectedInterests] = useState<string[]>(interests);
+  
+  // Role & Save states
+  const [selectedRole, setSelectedRole] = useState<'Student' | 'Researcher'>(
+    user?.role === 'Researcher' ? 'Researcher' : 'Student'
+  );
+  const [isRoleSaved, setIsRoleSaved] = useState(false);
+  const [isInterestsSaved, setIsInterestsSaved] = useState(false);
+
+  useEffect(() => {
+    if (user?.role) {
+      setSelectedRole(user.role === 'Researcher' ? 'Researcher' : 'Student');
+    }
+  }, [user?.role]);
+
+  // Keep local selectedInterests in sync if context interests change
+  useEffect(() => {
+    if (interests && interests.length > 0) {
+      setSelectedInterests(interests);
+    }
+  }, [interests]);
 
   // Custom Topic input modal state
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
@@ -58,19 +78,36 @@ export const SettingsScreen: React.FC = () => {
   const [photoUrlInput, setPhotoUrlInput] = useState('');
 
   const handleSavePhotoData = async (dataStr: string) => {
+    if (dataStr && dataStr.length > 3 * 1024 * 1024) {
+      Alert.alert(
+        '⚠️ Photo Too Large',
+        'The selected image exceeds the maximum size limit (3MB). Please pick a smaller photo from your gallery or paste a web image link.'
+      );
+      return;
+    }
+
     try {
       const res = await userApi.updateProfile({ avatar_url: dataStr });
       if (res.success && res.data) {
         setUser(res.data);
-        Alert.alert('✅ Photo Updated', 'Your profile photo has been updated.');
+        Alert.alert('✅ Profile Photo Updated', 'Your new profile photo has been saved.');
         setIsPhotoModalOpen(false);
         setPhotoUrlInput('');
       } else {
-        Alert.alert('Error', res.error || 'Failed to update photo.');
+        Alert.alert('Unable to Update Photo', res.error || 'The image could not be saved. Please try another photo.');
       }
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Failed to update photo.');
+      Alert.alert('Unable to Update Photo', 'The image file is too large. Please select a smaller photo.');
     }
+  };
+
+  const handleSavePhoto = async () => {
+    const trimmed = photoUrlInput.trim();
+    if (!trimmed) {
+      Alert.alert('Web Link Required', 'Please enter a valid image web link.');
+      return;
+    }
+    await handleSavePhotoData(trimmed);
   };
 
   const handleOpenGallery = async () => {
@@ -97,42 +134,45 @@ export const SettingsScreen: React.FC = () => {
       // Dynamic import for expo-image-picker in native environment
       try {
         const ImagePicker = require('expo-image-picker');
-        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!permission.granted) {
+        
+        let permission;
+        try {
+          permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        } catch (permErr) {
+          console.warn('Permission request error:', permErr);
+        }
+
+        if (permission && !permission.granted) {
           Alert.alert('Permission Needed', 'Permission to access photo gallery is required.');
           return;
         }
 
+        // Safe mediaTypes resolution for expo-image-picker in Expo 54
+        const mediaTypesValue = ImagePicker.MediaTypeOptions?.Images || 'images';
+
         const result = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          mediaTypes: mediaTypesValue,
           allowsEditing: true,
           aspect: [1, 1],
-          quality: 0.6,
+          quality: 0.3,
           base64: true,
         });
 
-        if (!result.canceled && result.assets && result.assets[0]) {
+        if (result && !result.canceled && result.assets && result.assets.length > 0) {
           const asset = result.assets[0];
           const photoData = asset.base64
             ? `data:image/jpeg;base64,${asset.base64}`
             : asset.uri;
           await handleSavePhotoData(photoData);
         }
-      } catch (pickerErr) {
+      } catch (pickerErr: any) {
+        console.warn('Native picker error, opening URL input modal:', pickerErr);
         // Fall back to URL/Base64 input modal if native picker is unavailable
         setIsPhotoModalOpen(true);
       }
     } catch (err: any) {
       Alert.alert('Error', err?.message || 'Could not open photo gallery.');
     }
-  };
-
-  const handleSavePhoto = async () => {
-    if (!photoUrlInput.trim()) {
-      Alert.alert('Error', 'Please enter a valid image URL or base64 string.');
-      return;
-    }
-    await handleSavePhotoData(photoUrlInput.trim());
   };
 
   const handleDeletePhoto = async () => {
@@ -173,6 +213,27 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
+  const handleSaveRole = async (newRole: 'Student' | 'Researcher') => {
+    setSelectedRole(newRole);
+    if (isGuest) {
+      setIsRoleSaved(true);
+      setTimeout(() => setIsRoleSaved(false), 3000);
+      return;
+    }
+    try {
+      const res = await userApi.updateProfile({ role: newRole });
+      if (res.success && res.data) {
+        setUser(res.data);
+        setIsRoleSaved(true);
+        setTimeout(() => setIsRoleSaved(false), 3000);
+      } else {
+        Alert.alert('Update Failed', res.error || 'Could not update role.');
+      }
+    } catch (err: any) {
+      Alert.alert('Update Failed', err?.message || 'Could not update role.');
+    }
+  };
+
   const handleSaveInterests = async () => {
     if (selectedInterests.length === 0) {
       Alert.alert('Selection Error', 'Please select at least 1 interest to continue.');
@@ -184,7 +245,8 @@ export const SettingsScreen: React.FC = () => {
     }
     const success = await saveInterests(selectedInterests);
     if (success) {
-      Alert.alert('✅ Interests Saved', 'Your research interests have been updated and synced to your account.');
+      setIsInterestsSaved(true);
+      setTimeout(() => setIsInterestsSaved(false), 3000);
     } else {
       Alert.alert('Error', 'Failed to save interests. Please select 1 to 4 topics.');
     }
@@ -235,7 +297,7 @@ export const SettingsScreen: React.FC = () => {
                     onPress={() => setIsPhotoModalOpen(true)}
                   >
                     <Camera size={12} color={colors.text} />
-                    <Text style={[styles.photoActionText, { color: colors.text }]}>URL Input</Text>
+                    <Text style={[styles.photoActionText, { color: colors.text }]}>Web Link</Text>
                   </TouchableOpacity>
 
                   {user?.avatar_url ? (
@@ -289,11 +351,62 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
+        {/* Academic Role Card */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <View style={styles.cardHeader}>
+              <UserCheck size={18} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Academic Role</Text>
+            </View>
+            {isRoleSaved && (
+              <View style={{ backgroundColor: '#22c55e20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
+                <Check size={12} color="#22c55e" style={{ marginRight: 4 }} />
+                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved! ✓</Text>
+              </View>
+            )}
+          </View>
+          <Text style={[styles.fieldSub, { color: colors.textMuted }]}>
+            Select your academic role to personalize your research context:
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+            {(['Student', 'Researcher'] as const).map((roleChoice) => {
+              const isActive = selectedRole === roleChoice;
+              return (
+                <TouchableOpacity
+                  key={roleChoice}
+                  style={[
+                    styles.roleBtn,
+                    isActive && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
+                    { borderColor: colors.border, flex: 1 }
+                  ]}
+                  onPress={() => handleSaveRole(roleChoice)}
+                >
+                  <Text style={[
+                    styles.roleBtnText,
+                    { color: colors.textMuted },
+                    isActive && { color: colors.primary, fontWeight: '700' }
+                  ]}>
+                    {roleChoice === 'Student' ? '🎓 Student' : '🔬 Researcher'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
         {/* Custom Interests Selector Card */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.cardHeader}>
-            <Layers size={18} color={colors.primary} />
-            <Text style={[styles.cardTitle, { color: colors.text }]}>Research Interests (Choose 1 to 4)</Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <View style={styles.cardHeader}>
+              <Layers size={18} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Research Interests ({selectedInterests.length}/4)</Text>
+            </View>
+            {isInterestsSaved && (
+              <View style={{ backgroundColor: '#22c55e20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
+                <Check size={12} color="#22c55e" style={{ marginRight: 4 }} />
+                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved! ✓</Text>
+              </View>
+            )}
           </View>
           <Text style={[styles.fieldSub, { color: colors.textMuted }]}>
             These interests will customize your "For You" recommendations feed:
@@ -309,7 +422,10 @@ export const SettingsScreen: React.FC = () => {
                     active && { backgroundColor: colors.primary + '25', borderColor: colors.primary },
                     { borderColor: colors.border }
                   ]}
-                  onPress={() => handleToggleInterest(interest)}
+                  onPress={() => {
+                    handleToggleInterest(interest);
+                    setIsInterestsSaved(false);
+                  }}
                 >
                   <Text style={[
                     styles.interestChipText, 
@@ -336,13 +452,26 @@ export const SettingsScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
           <TouchableOpacity 
-            style={[styles.saveBtn, { backgroundColor: colors.primary }, !isInterestsValid && { opacity: 0.5 }]} 
+            style={[
+              styles.saveBtn,
+              { backgroundColor: isInterestsSaved ? '#22c55e' : colors.primary },
+              !isInterestsValid && { opacity: 0.5 }
+            ]} 
             onPress={handleSaveInterests}
             disabled={!isInterestsValid}
           >
-            <Text style={[styles.saveBtnText, { color: primaryBtnTextColor }]}>
-              Save Interests ({selectedInterests.length}/4)
-            </Text>
+            {isInterestsSaved ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+                <Check size={18} color="#ffffff" style={{ marginRight: 6 }} />
+                <Text style={[styles.saveBtnText, { color: '#ffffff', fontWeight: '800' }]}>
+                  Saved! ✓
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.saveBtnText, { color: primaryBtnTextColor }]}>
+                Save Interests ({selectedInterests.length}/4)
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -437,16 +566,16 @@ export const SettingsScreen: React.FC = () => {
 
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
               <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
-              <Text style={{ marginHorizontal: 10, color: colors.textMuted, fontSize: 11, fontWeight: '700' }}>OR PASTE IMAGE URL</Text>
+              <Text style={{ marginHorizontal: 10, color: colors.textMuted, fontSize: 11, fontWeight: '700' }}>OR PASTE IMAGE LINK</Text>
               <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
             </View>
 
             <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 8 }}>
-              Paste image URL or Base64 data string:
+              Paste web address of image:
             </Text>
             <TextInput
               style={[styles.input, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-              placeholder="https://example.com/photo.jpg or data:image/png..."
+              placeholder="https://example.com/my-photo.jpg"
               placeholderTextColor={colors.textMuted}
               value={photoUrlInput}
               onChangeText={setPhotoUrlInput}
@@ -466,7 +595,7 @@ export const SettingsScreen: React.FC = () => {
                 style={[styles.customModalAddBtn, { backgroundColor: colors.primary }]}
                 onPress={handleSavePhoto}
               >
-                <Text style={{ color: primaryBtnTextColor, fontWeight: '700' }}>Save URL</Text>
+                <Text style={{ color: primaryBtnTextColor, fontWeight: '700' }}>Save Photo</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -608,6 +737,18 @@ const styles = StyleSheet.create({
   interestChipText: {
     fontSize: 12,
     fontWeight: '500',
+  },
+  roleBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roleBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   logoutBtn: {
     flexDirection: 'row',

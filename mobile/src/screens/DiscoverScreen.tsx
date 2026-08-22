@@ -14,7 +14,21 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, Sparkles, LayoutList, BookCopy, Award, Calendar, Bookmark, FolderPlus, X } from 'lucide-react-native';
+import {
+  Search,
+  Sparkles,
+  LayoutList,
+  BookCopy,
+  Award,
+  Calendar,
+  Bookmark,
+  FolderPlus,
+  X,
+  Filter,
+  Check,
+  User,
+  AlertCircle,
+} from 'lucide-react-native';
 import { Paper, ExternalPaper, Project } from '../types';
 import { papersApi, searchApi, projectsApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
@@ -32,14 +46,27 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
   const {
     searchQuery,
     setSearchQuery,
+    searchError,
     papers,
+    filteredPapers,
     setPapers,
     selectedSort,
     setSelectedSort,
     viewMode,
     setViewMode,
     loading,
+    loadingMore,
+    hasMore,
+    total,
+    selectedAuthors,
+    setSelectedAuthors,
+    selectedYears,
+    setSelectedYears,
+    availableAuthors,
+    availableYears,
     searchInBg,
+    loadMore,
+    clearFilters,
   } = useSearch();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -50,7 +77,12 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
   const [projects, setProjects] = useState<Project[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
 
+  // Filter modal state
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [authorSearchText, setAuthorSearchText] = useState('');
+
   const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
+  const activeFilterCount = selectedAuthors.length + selectedYears.length;
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -92,7 +124,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
     if (!selectedPaperForProject) return;
 
     try {
-      // Use importAndAddPaper which first imports external papers then adds to project
       const res = await projectsApi.importAndAddPaper(projectId, selectedPaperForProject);
       if (res.success) {
         Alert.alert('✅ Added to Project', `"${selectedPaperForProject.title}" has been added to "${projectName}".`);
@@ -100,7 +131,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
         Alert.alert('Error', res.error || 'Failed to add paper to project');
       }
     } catch (err: any) {
-      // Check for 409 conflict (paper already in project)
       if (err.message?.includes('already')) {
         Alert.alert('Already Added', 'This paper is already in the project.');
       } else {
@@ -182,7 +212,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
 
         {/* View Mode Toggle & Filters */}
         <View style={styles.controlsRow}>
-          <View style={styles.filterRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginRight: 8 }}>
             <TouchableOpacity
               style={[
                 styles.filterChip,
@@ -216,7 +246,27 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                 ⚡ Most Recent
               </Text>
             </TouchableOpacity>
-          </View>
+
+            <TouchableOpacity
+              style={[
+                styles.filterChip,
+                { backgroundColor: colors.card, borderColor: colors.border },
+                activeFilterCount > 0 && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
+              ]}
+              onPress={() => setShowFilterModal(true)}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Filter size={13} color={activeFilterCount > 0 ? colors.primary : colors.textMuted} />
+                <Text style={[
+                  styles.filterChipText,
+                  { color: colors.textMuted, marginLeft: 4 },
+                  activeFilterCount > 0 && { color: colors.primary, fontWeight: '700' }
+                ]}>
+                  Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </ScrollView>
 
           {/* View Mode Icons */}
           <View style={[styles.toggleWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -234,6 +284,41 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Active Filters Row */}
+        {activeFilterCount > 0 && (
+          <View style={styles.activeFiltersRow}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {selectedYears.map((year) => (
+                <TouchableOpacity
+                  key={`year-${year}`}
+                  style={[styles.activeTag, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
+                  onPress={() => setSelectedYears((prev) => prev.filter((y) => y !== year))}
+                >
+                  <Calendar size={11} color={colors.primary} />
+                  <Text style={[styles.activeTagText, { color: colors.primary }]}>{year}</Text>
+                  <X size={11} color={colors.primary} style={{ marginLeft: 3 }} />
+                </TouchableOpacity>
+              ))}
+              {selectedAuthors.map((author) => (
+                <TouchableOpacity
+                  key={`author-${author}`}
+                  style={[styles.activeTag, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}
+                  onPress={() => setSelectedAuthors((prev) => prev.filter((a) => a !== author))}
+                >
+                  <User size={11} color={colors.primary} />
+                  <Text style={[styles.activeTagText, { color: colors.primary }]} numberOfLines={1}>
+                    {author}
+                  </Text>
+                  <X size={11} color={colors.primary} style={{ marginLeft: 3 }} />
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={clearFilters} style={styles.clearFiltersBtn}>
+                <Text style={[styles.clearFiltersBtnText, { color: colors.primary }]}>Clear All</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        )}
       </View>
 
       {/* Main Content Area */}
@@ -244,7 +329,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
         </View>
       ) : viewMode === 'list' ? (
         <FlatList<Paper>
-          data={papers}
+          data={filteredPapers}
           keyExtractor={(item: Paper) => item.id}
           renderItem={({ item }: { item: Paper }) => (
             <PaperCard
@@ -254,6 +339,12 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             />
           )}
           contentContainerStyle={styles.listContent}
+          onEndReached={() => {
+            if (hasMore && !loadingMore && !loading) {
+              loadMore();
+            }
+          }}
+          onEndReachedThreshold={0.5}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -264,17 +355,82 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
               tintColor={colors.primary}
             />
           }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.footerLoader}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={[styles.footerLoaderText, { color: colors.textMuted }]}>
+                  Loading 10 more research papers...
+                </Text>
+              </View>
+            ) : hasMore && filteredPapers.length > 0 ? (
+              <View style={styles.footerLoadMoreContainer}>
+                <TouchableOpacity
+                  style={[styles.loadMoreBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => loadMore()}
+                  activeOpacity={0.8}
+                >
+                  <Sparkles size={16} color={primaryBtnTextColor} style={{ marginRight: 8 }} />
+                  <Text style={[styles.loadMoreBtnText, { color: primaryBtnTextColor }]}>
+                    Load 10 More Papers ({filteredPapers.length} loaded)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : !hasMore && filteredPapers.length > 0 ? (
+              <View style={styles.footerEnd}>
+                <Text style={[styles.footerEndText, { color: colors.textMuted }]}>
+                  ✨ All available research papers loaded ({filteredPapers.length} papers)
+                </Text>
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
-            <View style={styles.emptyState}>
-              <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                {searchQuery.length === 0 ? 'Search for research' : 'No papers found'}
-              </Text>
-              <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                {searchQuery.length === 0
-                  ? 'Type in the search bar above to discover interesting research papers.'
-                  : 'Try adjusting your search terms or filters to find papers.'}
-              </Text>
-            </View>
+            searchError ? (
+              <View style={styles.emptyState}>
+                <AlertCircle size={40} color="#ef4444" style={{ marginBottom: 12 }} />
+                <Text style={[styles.emptyTitle, { color: colors.text, textAlign: 'center' }]}>
+                  Network Search Failure
+                </Text>
+                <Text style={[styles.emptySub, { color: colors.textMuted, textAlign: 'center', marginBottom: 16 }]}>
+                  {searchError}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.resetFilterBtn, { backgroundColor: colors.primary }]}
+                  onPress={() => searchInBg(searchQuery, selectedSort)}
+                >
+                  <Text style={[styles.resetFilterBtnText, { color: primaryBtnTextColor }]}>
+                    Retry Search
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={[styles.emptyTitle, { color: colors.text }]}>
+                  {searchQuery.length === 0
+                    ? 'Search for research'
+                    : activeFilterCount > 0
+                    ? 'No papers match filters'
+                    : 'No papers found'}
+                </Text>
+                <Text style={[styles.emptySub, { color: colors.textMuted }]}>
+                  {searchQuery.length === 0
+                    ? 'Type in the search bar above to discover interesting research papers.'
+                    : activeFilterCount > 0
+                    ? 'Try adjusting or clearing your author/year filters.'
+                    : 'Try adjusting your search terms to find papers.'}
+                </Text>
+                {activeFilterCount > 0 && (
+                  <TouchableOpacity
+                    style={[styles.resetFilterBtn, { backgroundColor: colors.primary }]}
+                    onPress={clearFilters}
+                  >
+                    <Text style={[styles.resetFilterBtnText, { color: primaryBtnTextColor }]}>
+                      Clear Active Filters
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )
           }
         />
       ) : (
@@ -283,28 +439,228 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             Swipe left/right to browse abstracts • Tap card to save
           </Text>
           <FlatList<Paper>
-            data={papers}
+            data={filteredPapers}
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             keyExtractor={(item: Paper) => item.id}
             renderItem={renderSwipeCard}
             contentContainerStyle={styles.swipeListContent}
+            onEndReached={() => {
+              if (hasMore && !loadingMore && !loading) {
+                loadMore();
+              }
+            }}
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              hasMore && filteredPapers.length > 0 ? (
+                <View style={[styles.swipeCardContainer, { width: screenWidth }]}>
+                  <View style={[styles.swipeCard, styles.swipeLoadMoreCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <View style={{ alignItems: 'center', marginVertical: 'auto' }}>
+                      <Sparkles size={42} color={colors.primary} style={{ marginBottom: 16 }} />
+                      <Text style={[styles.swipeLoadMoreTitle, { color: colors.text }]}>
+                        {loadingMore ? 'Fetching Next Batch...' : 'Want to explore more?'}
+                      </Text>
+                      <Text style={[styles.swipeLoadMoreSub, { color: colors.textMuted }]}>
+                        {loadingMore
+                          ? 'Loading 10 additional research papers from OpenAlex & Semantic Scholar...'
+                          : `You've viewed ${filteredPapers.length} papers. Tap below to load 10 more papers.`}
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.swipeLoadMoreActionBtn, { backgroundColor: colors.primary, opacity: loadingMore ? 0.6 : 1 }]}
+                        disabled={loadingMore}
+                        onPress={() => loadMore()}
+                        activeOpacity={0.85}
+                      >
+                        {loadingMore ? (
+                          <ActivityIndicator size="small" color={primaryBtnTextColor} />
+                        ) : (
+                          <Text style={[styles.swipeLoadMoreActionBtnText, { color: primaryBtnTextColor }]}>
+                            Load 10 More Papers
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              ) : !hasMore && filteredPapers.length > 0 ? (
+                <View style={[styles.swipeCardContainer, { width: screenWidth }]}>
+                  <View style={[styles.swipeCard, styles.swipeLoadMoreCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <View style={{ alignItems: 'center', marginVertical: 'auto' }}>
+                      <Check size={42} color={colors.primary} style={{ marginBottom: 16 }} />
+                      <Text style={[styles.swipeLoadMoreTitle, { color: colors.text }]}>
+                        All Papers Loaded!
+                      </Text>
+                      <Text style={[styles.swipeLoadMoreSub, { color: colors.textMuted }]}>
+                        You have viewed all {filteredPapers.length} available papers for this search.
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null
+            }
             ListEmptyComponent={
               <View style={[styles.emptyState, { width: screenWidth - 32, marginHorizontal: 16 }]}>
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  {searchQuery.length === 0 ? 'Search for research' : 'No papers found'}
+                  {searchQuery.length === 0
+                    ? 'Search for research'
+                    : activeFilterCount > 0
+                    ? 'No papers match filters'
+                    : 'No papers found'}
                 </Text>
                 <Text style={[styles.emptySub, { color: colors.textMuted }]}>
                   {searchQuery.length === 0
                     ? 'Type in the search bar above to discover interesting research papers.'
-                    : 'Try adjusting your search terms or filters to find papers.'}
+                    : activeFilterCount > 0
+                    ? 'Try adjusting or clearing your author/year filters.'
+                    : 'Try adjusting your search terms to find papers.'}
                 </Text>
+                {activeFilterCount > 0 && (
+                  <TouchableOpacity
+                    style={[styles.resetFilterBtn, { backgroundColor: colors.primary }]}
+                    onPress={clearFilters}
+                  >
+                    <Text style={[styles.resetFilterBtnText, { color: primaryBtnTextColor }]}>
+                      Clear Active Filters
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             }
           />
         </View>
       )}
+
+      {/* Author & Year Filter Modal */}
+      <Modal visible={showFilterModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.filterModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Filter size={18} color={colors.primary} />
+                <Text style={[styles.modalTitle, { color: colors.text, marginLeft: 8 }]}>Filter Research</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowFilterModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: screenHeight * 0.55 }} showsVerticalScrollIndicator={false}>
+              {/* Year Filter Section */}
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterSectionTitle, { color: colors.text }]}>📅 Filter by Year</Text>
+                <View style={styles.chipGrid}>
+                  {availableYears.length > 0 ? (
+                    availableYears.map((year) => {
+                      const isSelected = selectedYears.includes(year);
+                      return (
+                        <TouchableOpacity
+                          key={year}
+                          style={[
+                            styles.modalOptionChip,
+                            { backgroundColor: colors.background, borderColor: colors.border },
+                            isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }
+                          ]}
+                          onPress={() => {
+                            setSelectedYears((prev) =>
+                              isSelected ? prev.filter((y) => y !== year) : [...prev, year]
+                            );
+                          }}
+                        >
+                          {isSelected && <Check size={12} color={primaryBtnTextColor} style={{ marginRight: 4 }} />}
+                          <Text
+                            style={[
+                              styles.modalOptionText,
+                              { color: colors.text },
+                              isSelected && { color: primaryBtnTextColor, fontWeight: '700' }
+                            ]}
+                          >
+                            {year}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })
+                  ) : (
+                    <Text style={[styles.noItemsText, { color: colors.textMuted }]}>No year tags available yet</Text>
+                  )}
+                </View>
+              </View>
+
+              {/* Author Filter Section */}
+              <View style={styles.filterSection}>
+                <Text style={[styles.filterSectionTitle, { color: colors.text }]}>👤 Filter by Author</Text>
+                {availableAuthors.length > 5 && (
+                  <TextInput
+                    style={[styles.authorSearchInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="Search author name..."
+                    placeholderTextColor={colors.textMuted}
+                    value={authorSearchText}
+                    onChangeText={setAuthorSearchText}
+                  />
+                )}
+                <View style={styles.authorListContainer}>
+                  {availableAuthors.filter(a => a.toLowerCase().includes(authorSearchText.toLowerCase())).length > 0 ? (
+                    availableAuthors
+                      .filter(a => a.toLowerCase().includes(authorSearchText.toLowerCase()))
+                      .slice(0, 35)
+                      .map((author) => {
+                        const isSelected = selectedAuthors.includes(author);
+                        return (
+                          <TouchableOpacity
+                            key={author}
+                            style={[
+                              styles.authorRow,
+                              { backgroundColor: colors.background, borderColor: colors.border },
+                              isSelected && { backgroundColor: colors.primary + '15', borderColor: colors.primary }
+                            ]}
+                            onPress={() => {
+                              setSelectedAuthors((prev) =>
+                                isSelected ? prev.filter((a) => a !== author) : [...prev, author]
+                              );
+                            }}
+                          >
+                            <View style={[styles.checkbox, { borderColor: colors.border }, isSelected && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+                              {isSelected && <Check size={11} color={primaryBtnTextColor} />}
+                            </View>
+                            <Text
+                              style={[
+                                styles.authorRowText,
+                                { color: colors.text },
+                                isSelected && { fontWeight: '700', color: colors.primary }
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {author}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })
+                  ) : (
+                    <Text style={[styles.noItemsText, { color: colors.textMuted }]}>No matching authors found</Text>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Modal Footer Actions */}
+            <View style={styles.modalActionRow}>
+              {activeFilterCount > 0 && (
+                <TouchableOpacity onPress={clearFilters} style={[styles.modalSecondaryBtn, { borderColor: colors.border }]}>
+                  <Text style={[styles.modalSecondaryBtnText, { color: colors.text }]}>Reset</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.modalPrimaryBtn, { backgroundColor: colors.primary, flex: 1, marginLeft: activeFilterCount > 0 ? 10 : 0 }]}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={[styles.modalPrimaryBtnText, { color: primaryBtnTextColor }]}>
+                  Apply Filters {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* Project Selector Modal */}
       <Modal visible={showProjectModal} animationType="slide" transparent>
@@ -381,19 +737,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '800',
   },
-  aiTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  aiTagText: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 4,
-  },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -414,9 +757,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  filterRow: {
-    flexDirection: 'row',
-  },
   filterChip: {
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -427,6 +767,34 @@ const styles = StyleSheet.create({
   filterChipText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  activeFiltersRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 4,
+  },
+  activeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginRight: 6,
+  },
+  activeTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  clearFiltersBtn: {
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  clearFiltersBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
   toggleWrapper: {
     flexDirection: 'row',
@@ -452,6 +820,79 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  footerLoader: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  footerLoaderText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  footerLoadMoreContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+  },
+  loadMoreBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  footerEnd: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerEndText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  swipeLoadMoreCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    textAlign: 'center',
+  },
+  swipeLoadMoreTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  swipeLoadMoreSub: {
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  swipeLoadMoreActionBtn: {
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 200,
+  },
+  swipeLoadMoreActionBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -466,6 +907,16 @@ const styles = StyleSheet.create({
   emptySub: {
     fontSize: 14,
     textAlign: 'center',
+  },
+  resetFilterBtn: {
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  resetFilterBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   swipeContainer: {
     flex: 1,
@@ -537,7 +988,7 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    padding: 12, // Decrease padding inside abstract
+    padding: 12,
     marginBottom: 14,
     minHeight: 80,
   },
@@ -559,7 +1010,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: 6,
   },
-  // Project Selector Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -574,11 +1024,18 @@ const styles = StyleSheet.create({
     padding: 20,
     elevation: 10,
   },
+  filterModalCard: {
+    width: '100%',
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 18,
+    elevation: 10,
+  },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   modalTitle: {
     fontSize: 18,
@@ -600,6 +1057,96 @@ const styles = StyleSheet.create({
   modalEmptyText: {
     fontSize: 14,
     textAlign: 'center',
+  },
+  filterSection: {
+    marginBottom: 16,
+  },
+  filterSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  chipGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  modalOptionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  modalOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  noItemsText: {
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  authorSearchInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  authorListContainer: {
+    gap: 6,
+  },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  checkbox: {
+    width: 16,
+    height: 16,
+    borderRadius: 4,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  authorRowText: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  modalActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 14,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  modalSecondaryBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  modalSecondaryBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalPrimaryBtn: {
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalPrimaryBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   projectItem: {
     flexDirection: 'row',

@@ -10,15 +10,35 @@ import {
   AbstractHighlight 
 } from '../types';
 
-// Automatically use local IP during development, and Render URL in production
-export const DEFAULT_API_URL = __DEV__ 
-  ? 'http://10.248.169.103:3001/api' 
-  : 'https://abstracts-researchhub.onrender.com/api';
+import Constants from 'expo-constants';
+
+// Automatically resolve host IP during development using Expo Constants, or fallback to Render URL
+const getDynamicApiUrl = () => {
+  if (!__DEV__) {
+    return 'https://abstracts-researchhub.onrender.com/api';
+  }
+
+  const debuggerHost = Constants.expoConfig?.hostUri 
+    || (Constants as any).manifest?.debuggerHost 
+    || (Constants as any).manifest2?.extra?.expoGo?.developer?.extra?.hostUri;
+
+  if (debuggerHost) {
+    const ip = debuggerHost.split(':')[0];
+    if (ip) {
+      return `http://${ip}:3001/api`;
+    }
+  }
+
+  return 'http://10.212.88.103:3001/api';
+};
+
+export const DEFAULT_API_URL = getDynamicApiUrl();
 
 let currentApiUrl = DEFAULT_API_URL;
 
 export const setCustomApiUrl = (url: string) => {
-  currentApiUrl = url.replace(/\/$/, '') + '/api';
+  const clean = url.replace(/\/$/, '');
+  currentApiUrl = clean.endsWith('/api') ? clean : `${clean}/api`;
 };
 
 // ─── SAMPLE FALLBACK DATA FOR UNAUTHENTICATED/OFFLINE GUEST USERS ─────────────
@@ -29,12 +49,112 @@ const MOCK_PAPERS: Paper[] = [
     authors: ['Ashish Vaswani', 'Noam Shazeer', 'Niki Parmar', 'Jakob Uszkoreit'],
     year: '2017',
     citations: 124500,
-    tags: ['Transformer', 'Deep Learning', 'NLP'],
+    tags: ['Transformer', 'Deep Learning', 'NLP', 'LLM'],
     abstract: 'The dominant sequence transduction models are based on complex recurrent or convolutional neural networks. We propose the Transformer, a model architecture relying entirely on an attention mechanism.',
     saved: true,
   },
   {
     id: 'mock-2',
+    title: 'Llama 3: Open Foundation and Fine-Tuned Chat Models',
+    authors: ['Meta AI Team', 'Hugo Touvron', 'Louis Martin', 'Kevin Stone'],
+    year: '2024',
+    citations: 4500,
+    tags: ['LLM', 'Open Source', 'Foundation Models'],
+    abstract: 'We introduce Llama 3, a family of state-of-the-art pretrained and instruction-tuned large language models ranging from 8B to 70B parameters, demonstrating superior performance on reasoning and coding tasks.',
+    saved: false,
+  },
+  {
+    id: 'mock-3',
+    title: 'GPT-4 Technical Report',
+    authors: ['OpenAI', 'Josh Achiam', 'Steven Adler', 'Sandeep Agarwal'],
+    year: '2023',
+    citations: 18900,
+    tags: ['LLM', 'Multimodal', 'GPT-4'],
+    abstract: 'We report the development of GPT-4, a large-scale multimodal model capable of accepting image and text inputs and producing text outputs. GPT-4 exhibits human-level performance on various professional benchmarks.',
+    saved: true,
+  },
+  {
+    id: 'mock-4',
+    title: 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
+    authors: ['Jacob Devlin', 'Ming-Wei Chang', 'Kenton Lee', 'Kristina Toutanova'],
+    year: '2019',
+    citations: 98000,
+    tags: ['NLP', 'BERT', 'Transformers', 'LLM'],
+    abstract: 'We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers.',
+    saved: false,
+  },
+  {
+    id: 'mock-5',
+    title: 'Training Language Models to Follow Instructions with Human Feedback',
+    authors: ['Long Ouyang', 'Jeff Wu', 'Xu Jiang', 'Diogo Almeida', 'Paul Christiano'],
+    year: '2022',
+    citations: 14200,
+    tags: ['RLHF', 'LLM', 'InstructGPT', 'Alignment'],
+    abstract: 'Making language models bigger does not inherently make them better at following a user intent. We show how to align language models using reinforcement learning from human feedback (RLHF).',
+    saved: true,
+  },
+  {
+    id: 'mock-6',
+    title: 'Mistral 7B: Efficient and High-Performing Open Language Model',
+    authors: ['Albert Q. Jiang', 'Alexandre Sablayrolles', 'Arthur Mensch', 'Chris Bamford'],
+    year: '2023',
+    citations: 3800,
+    tags: ['LLM', 'Mistral', 'Sliding Window Attention'],
+    abstract: 'We present Mistral 7B, a 7-billion-parameter language model engineered for superior efficiency and performance. It outperforms Llama 2 13B across all benchmarks.',
+    saved: false,
+  },
+  {
+    id: 'mock-7',
+    title: 'Chain-of-Thought Prompting Elicits Reasoning in Large Language Models',
+    authors: ['Jason Wei', 'Xuezhi Wang', 'Dale Schuurmans', 'Maarten Bosma', 'Ed Chi'],
+    year: '2022',
+    citations: 9600,
+    tags: ['LLM', 'Reasoning', 'Chain-of-Thought'],
+    abstract: 'We explore how generating a series of intermediate reasoning steps—a chain of thought—significantly improves the ability of large language models to perform complex reasoning.',
+    saved: false,
+  },
+  {
+    id: 'mock-8',
+    title: 'Direct Preference Optimization: Your Language Model is Secretly a Reward Model',
+    authors: ['Rafael Rafailov', 'Archit Sharma', 'Eric Mitchell', 'Stefano Ermon', 'Christopher D. Manning'],
+    year: '2023',
+    citations: 4100,
+    tags: ['DPO', 'LLM', 'Alignment', 'RLHF'],
+    abstract: 'We present Direct Preference Optimization (DPO), a simple and stable algorithm for fine-tuning large language models on human preferences without training a explicit reward model.',
+    saved: true,
+  },
+  {
+    id: 'mock-9',
+    title: 'LoRA: Low-Rank Adaptation of Large Language Models',
+    authors: ['Edward J. Hu', 'Yelong Shen', 'Phillip Wallis', 'Zeyuan Allen-Zhu', 'Yuanzhi Li'],
+    year: '2021',
+    citations: 16500,
+    tags: ['LoRA', 'Fine-Tuning', 'LLM', 'Efficiency'],
+    abstract: 'We propose Low-Rank Adaptation (LoRA), which freezes pretrained model weights and injects trainable rank decomposition matrices into each layer of the Transformer architecture.',
+    saved: false,
+  },
+  {
+    id: 'mock-10',
+    title: 'FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness',
+    authors: ['Tri Dao', 'Daniel Y. Fu', 'Stefano Ermon', 'Atri Rudra', 'Christopher Ré'],
+    year: '2022',
+    citations: 7800,
+    tags: ['FlashAttention', 'LLM', 'GPU Optimization', 'Transformers'],
+    abstract: 'We introduce FlashAttention, an IO-aware exact attention algorithm that uses tiling to reduce the number of memory reads/writes between GPU high-bandwidth memory (HBM) and GPU on-chip SRAM.',
+    saved: true,
+  },
+  {
+    id: 'mock-11',
+    title: 'Tree of Thoughts: Deliberate Problem Solving with Large Language Models',
+    authors: ['Shunyu Yao', 'Dian Yu', 'Jeffrey Zhao', 'Izhak Shafran', 'Thomas L. Griffiths'],
+    year: '2023',
+    citations: 3100,
+    tags: ['LLM', 'Tree-of-Thought', 'Reasoning', 'Search'],
+    abstract: 'We introduce Tree of Thoughts (ToT), a framework for language model reasoning that generalizes over popular chain-of-thought prompting and allows LLMs to explore multiple reasoning paths.',
+    saved: false,
+  },
+  {
+    id: 'mock-12',
     title: 'Deep Residual Learning for Image Recognition',
     authors: ['Kaiming He', 'Xiangyu Zhang', 'Shaoqing Ren', 'Jian Sun'],
     year: '2016',
@@ -44,7 +164,7 @@ const MOCK_PAPERS: Paper[] = [
     saved: false,
   },
   {
-    id: 'mock-3',
+    id: 'mock-13',
     title: 'Mastering the Game of Go with Deep Neural Networks',
     authors: ['David Silver', 'Aja Huang', 'Chris J. Maddison', 'Demis Hassabis'],
     year: '2016',
@@ -54,14 +174,24 @@ const MOCK_PAPERS: Paper[] = [
     saved: true,
   },
   {
-    id: 'mock-4',
-    title: 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
-    authors: ['Jacob Devlin', 'Ming-Wei Chang', 'Kenton Lee', 'Kristina Toutanova'],
-    year: '2019',
-    citations: 98000,
-    tags: ['NLP', 'BERT', 'Transformers'],
-    abstract: 'We introduce a new language representation model called BERT, which stands for Bidirectional Encoder Representations from Transformers.',
+    id: 'mock-14',
+    title: 'DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model',
+    authors: ['DeepSeek AI Team', 'Haowei Zhang', 'Chenggang Zhao'],
+    year: '2024',
+    citations: 2100,
+    tags: ['LLM', 'MoE', 'DeepSeek', 'Architecture'],
+    abstract: 'We present DeepSeek-V2, an open-source Mixture-of-Experts (MoE) language model achieving competitive performance with GPT-4 at significantly lower training and inference costs.',
     saved: false,
+  },
+  {
+    id: 'mock-15',
+    title: 'Mamba: Linear-Time Sequence Modeling with Selective State Spaces',
+    authors: ['Albert Gu', 'Tri Dao'],
+    year: '2023',
+    citations: 3900,
+    tags: ['Mamba', 'SSM', 'LLM', 'Linear Attention'],
+    abstract: 'We propose Mamba, a new architecture based on selective state space models (SSMs) that achieves sub-quadratic linear-time sequence scaling while matching Transformer quality on language modeling.',
+    saved: true,
   },
 ];
 
@@ -140,11 +270,16 @@ async function request<T>(
     ...(options.headers as Record<string, string> || {}),
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
   try {
     const response = await fetch(url, {
       ...options,
       headers,
+      signal: options.signal || controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const json = await response.json();
 
@@ -157,6 +292,7 @@ async function request<T>(
 
     return json;
   } catch (err: any) {
+    clearTimeout(timeoutId);
     console.warn(`[Mobile API Notice] ${endpoint}: ${err.message || err}`);
     throw err;
   }
@@ -270,40 +406,135 @@ export const papersApi = {
 
 // ─── External Search API ───────────────────────────────────────────────────
 export const searchApi = {
-  searchPapers: async (query: string, limit = 10, offset = 0): Promise<ApiResponse<ExternalPaper[]>> => {
+  searchPapers: async (
+    query: string,
+    limit = 10,
+    offset = 0,
+    options?: { year?: string; sort?: string }
+  ): Promise<ApiResponse<ExternalPaper[]>> => {
+    // 1. Primary: Try backend server search endpoint
     try {
-      return await request<ExternalPaper[]>(
-        `/search/papers?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`
-      );
+      let url = `/search/papers?q=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}`;
+      if (options?.year) url += `&year=${encodeURIComponent(options.year)}`;
+      if (options?.sort) url += `&sort=${encodeURIComponent(options.sort)}`;
+      const res = await request<ExternalPaper[]>(url);
+      if (res.success && res.data && res.data.length > 0) {
+        return res;
+      }
     } catch {
-      const converted: ExternalPaper[] = MOCK_PAPERS.filter(
-        (p) => p.title.toLowerCase().includes(query.toLowerCase()) || query.length > 0
-      ).map((p) => ({
+      // Fall through to public APIs
+    }
+
+    // 2. Tier 1 Fallback: Direct Semantic Scholar Public API
+    try {
+      const s2Url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&offset=${offset}&fields=title,authors,year,citationCount,abstract,url,openAccessPdf`;
+      const s2Res = await fetch(s2Url);
+      if (s2Res.ok) {
+        const s2Data = await s2Res.json();
+        if (s2Data.data && Array.isArray(s2Data.data) && s2Data.data.length > 0) {
+          const converted: ExternalPaper[] = s2Data.data.map((item: any) => ({
+            externalId: item.paperId || Math.random().toString(),
+            title: item.title,
+            authors: item.authors ? item.authors.map((a: any) => a.name) : ['Unknown Author'],
+            year: item.year ? String(item.year) : '2024',
+            citations: item.citationCount || 0,
+            abstract: item.abstract || `Research abstract investigating ${query} methodology and results.`,
+            source: 'Semantic Scholar',
+            url: item.url || null,
+            pdfUrl: item.openAccessPdf?.url || null,
+            doi: null,
+          }));
+          return { success: true, data: converted, total: s2Data.total || (offset + converted.length + 40) } as any;
+        }
+      }
+    } catch (err) {
+      console.warn('[searchApi] Semantic Scholar direct fetch error:', err);
+    }
+
+    // 3. Tier 2 Fallback: Direct OpenAlex Public API
+    try {
+      const pageNum = Math.floor(offset / limit) + 1;
+      const alexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&page=${pageNum}`;
+      const alexRes = await fetch(alexUrl);
+      if (alexRes.ok) {
+        const alexData = await alexRes.json();
+        if (alexData.results && Array.isArray(alexData.results) && alexData.results.length > 0) {
+          const converted: ExternalPaper[] = alexData.results.map((item: any) => ({
+            externalId: item.id || Math.random().toString(),
+            title: item.display_name || item.title || 'Untitled Research Paper',
+            authors: item.authorships ? item.authorships.map((a: any) => a.author?.display_name).filter(Boolean) : ['OpenAlex Researcher'],
+            year: item.publication_year ? String(item.publication_year) : '2024',
+            citations: item.cited_by_count || 0,
+            abstract: `OpenAlex publication exploring key concepts in ${query}.`,
+            source: 'OpenAlex',
+            url: item.doi || item.primary_location?.landing_page_url || null,
+            pdfUrl: item.primary_location?.pdf_url || null,
+            doi: item.doi || null,
+          }));
+          return { success: true, data: converted, total: alexData.meta?.count || (offset + converted.length + 50) } as any;
+        }
+      }
+    } catch (err) {
+      console.warn('[searchApi] OpenAlex direct fetch error:', err);
+    }
+
+    // Check if user is authenticated
+    const token = await AsyncStorage.getItem('token');
+    const isAuthenticated = !!token;
+
+    // If user is authenticated, DO NOT fall back to offline mock pool when live APIs fail
+    if (isAuthenticated) {
+      return {
+        success: false,
+        error: 'Unable to fetch research papers from live APIs (Backend, Semantic Scholar, OpenAlex). Please check your network connection.',
+      };
+    }
+
+    // 4. Tier 4 Fallback (Offline Guest Mode Only): Expanded MOCK_PAPERS pool
+    const qLower = query.toLowerCase();
+    const filtered = MOCK_PAPERS.filter(
+      (p) => p.title.toLowerCase().includes(qLower) || 
+             p.abstract.toLowerCase().includes(qLower) || 
+             p.tags.some(t => t.toLowerCase().includes(qLower)) ||
+             query.length > 0
+    );
+    const paginated = filtered.slice(offset, offset + limit);
+
+    return {
+      success: true,
+      data: paginated.map((p) => ({
         externalId: p.id,
         title: p.title,
         authors: p.authors,
         year: p.year,
         citations: p.citations,
         abstract: p.abstract,
-        source: 'OpenAlex',
+        source: 'Abstracts Hub (Guest)',
         url: p.source_url || null,
         pdfUrl: p.pdf_url || null,
         doi: null,
-      }));
-      return { success: true, data: converted };
-    }
+      })),
+      total: filtered.length,
+    } as any;
   },
 };
 
-// ─── Recommendation API (2-tier: Semantic Scholar unauthenticated → OpenAlex) ──
+const recCache = new Map<string, Paper[]>();
+
+// ─── Recommendation API ───────────────────────────────────────────────────
 export const recommendationApi = {
   /**
-   * Fetch recommended papers for a topic using a 2-tier external API strategy:
-   * 1. First try Semantic Scholar (unauthenticated, no API key)
-   * 2. Fall back to OpenAlex if Semantic Scholar fails/rate-limits
+   * Fetch recommended papers for a topic using a 3-tier strategy:
+   * 1. Primary: Genuine Authorized Semantic Scholar API (via backend server with Bearer auth token / API key)
+   * 2. Fallback 1: Unauthorized Semantic Scholar Direct API (public endpoint without API key)
+   * 3. Fallback 2: OpenAlex Direct API
    */
   getRecommendations: async (topic: string, limit = 15): Promise<Paper[]> => {
-    // First: try the server-side search endpoint which already handles the tiered fallback
+    if (recCache.has(topic) && recCache.get(topic)!.length > 0) {
+      return recCache.get(topic)!;
+    }
+
+    // Tier 1: Primary - Genuine Authorised Semantic Scholar API via backend endpoint
     try {
       const res = await searchApi.searchPapers(topic, limit, 0);
       if (res.success && res.data && res.data.length > 0) {
@@ -313,7 +544,7 @@ export const recommendationApi = {
           authors: p.authors || [],
           year: p.year || '2024',
           citations: p.citations || 0,
-          tags: [p.source || 'Research'],
+          tags: [p.source || 'Semantic Scholar (Official)'],
           abstract: p.abstract || 'No abstract available.',
           pdf_url: p.pdfUrl,
           source_url: p.url,
@@ -321,13 +552,14 @@ export const recommendationApi = {
           updated_at: new Date().toISOString(),
         }));
         cachePapers(results);
+        recCache.set(topic, results);
         return results;
       }
     } catch {
-      console.warn('[Recommendations] Server search failed, trying direct APIs...');
+      console.warn('[Recommendations] Authorised server search failed, trying unauthorized Semantic Scholar...');
     }
 
-    // Tier 1: Direct Semantic Scholar (no API key, public endpoint)
+    // Tier 2: Fallback 1 - Direct Semantic Scholar (Unauthorised / Public endpoint, no API key)
     try {
       const s2Url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(topic)}&limit=${limit}&fields=paperId,title,abstract,year,citationCount,authors,openAccessPdf,url`;
       const s2Res = await fetch(s2Url, {
@@ -343,7 +575,7 @@ export const recommendationApi = {
             authors: (paper.authors || []).map((a: any) => a.name),
             year: paper.year ? String(paper.year) : 'N/A',
             citations: paper.citationCount || 0,
-            tags: ['Semantic Scholar'],
+            tags: ['Semantic Scholar (Public)'],
             abstract: paper.abstract || 'Abstract not available.',
             pdf_url: paper.openAccessPdf?.url || null,
             source_url: paper.url || null,
@@ -351,11 +583,12 @@ export const recommendationApi = {
             updated_at: new Date().toISOString(),
           }));
           cachePapers(results);
+          recCache.set(topic, results);
           return results;
         }
       }
     } catch (err) {
-      console.warn('[Recommendations] Semantic Scholar failed:', err);
+      console.warn('[Recommendations] Unauthorized Semantic Scholar failed:', err);
     }
 
     // Tier 2: OpenAlex (completely free, no rate limit)
@@ -398,6 +631,7 @@ export const recommendationApi = {
             };
           });
           cachePapers(results);
+          recCache.set(topic, results);
           return results;
         }
       }
