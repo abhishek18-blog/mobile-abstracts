@@ -37,6 +37,11 @@ async function loadSearchFromStorage(query: string, sort: string): Promise<{ pap
   }
 }
 
+const sanitizeTags = (tags?: string[]): string[] => {
+  if (!tags || !Array.isArray(tags)) return [];
+  return tags.filter((t) => t && !/openalex|semantic scholar|abstracts hub/i.test(t.trim()));
+};
+
 interface SearchContextType {
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -207,7 +212,7 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             authors: p.authors || [],
             year: p.year || '2024',
             citations: p.citations || 0,
-            tags: [p.source || 'OpenAlex'],
+            tags: sanitizeTags(p.tags),
             abstract: p.abstract || 'No abstract available.',
             pdf_url: p.pdfUrl,
             source_url: p.url,
@@ -305,7 +310,7 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           authors: p.authors || [],
           year: p.year || '2024',
           citations: p.citations || 0,
-          tags: [p.source || 'OpenAlex'],
+          tags: sanitizeTags(p.tags),
           abstract: p.abstract || 'No abstract available.',
           pdf_url: p.pdfUrl,
           source_url: p.url,

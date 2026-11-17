@@ -17,8 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Search,
   Sparkles,
-  LayoutList,
-  BookCopy,
   Award,
   Calendar,
   Bookmark,
@@ -53,8 +51,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
     setPapers,
     selectedSort,
     setSelectedSort,
-    viewMode,
-    setViewMode,
     loading,
     loadingMore,
     hasMore,
@@ -143,67 +139,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
     }
   };
 
-  const renderSwipeCard = ({ item }: { item: Paper }) => {
-    return (
-      <View style={[styles.swipeCardContainer, { width: screenWidth }]}>
-        <View style={[styles.swipeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {/* Card Header info */}
-          <View style={styles.cardHeaderRow}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
-              <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
-                <Calendar size={12} color={colors.primary} />
-                <Text style={[styles.badgeText, { color: colors.text }]}>{item.year || '2024'}</Text>
-              </View>
-
-              <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
-                <Award size={12} color={colors.primary} />
-                <Text style={[styles.badgeText, { color: colors.text }]}>{item.citations || 0} Citations</Text>
-              </View>
-
-              {item.tags && item.tags.length > 0 && (
-                <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
-                  <Text style={[styles.badgeText, { color: colors.textMuted }]}>{item.tags[0]}</Text>
-                </View>
-              )}
-            </View>
-
-            <TouchableOpacity onPress={() => handleToggleSave(item.id)} style={styles.saveIcon} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Bookmark size={20} color={item.saved ? colors.primary : colors.textMuted} fill={item.saved ? colors.primary : 'transparent'} />
-            </TouchableOpacity>
-          </View>
-
-          <TouchableOpacity onPress={() => onSelectPaper(item.id)} activeOpacity={0.8}>
-            <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={3}>
-              {item.title}
-            </Text>
-          </TouchableOpacity>
-
-          <Text style={[styles.cardAuthors, { color: colors.primary }]} numberOfLines={1}>
-            {item.authors ? item.authors.join(', ') : 'Unknown Authors'}
-          </Text>
-
-          {/* Complete Abstract Scroll Area */}
-          <View style={[styles.abstractContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
-            <Text style={[styles.abstractHeaderLabel, { color: colors.textMuted }]}>Original Publication Abstract</Text>
-            <ScrollView showsVerticalScrollIndicator={true} nestedScrollEnabled={true}>
-              <Text selectable style={[styles.abstractText, { color: colors.text }]}>{getAbstractText(item)}</Text>
-            </ScrollView>
-          </View>
-
-          {/* Call to Action Button */}
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: colors.primary }]}
-            onPress={() => handleOpenProjectSelector(item)}
-            activeOpacity={0.85}
-          >
-            <FolderPlus size={18} color={primaryBtnTextColor} />
-            <Text style={[styles.actionBtnText, { color: primaryBtnTextColor }]}>Tap to Add to Project</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.headerContainer}>
@@ -233,9 +168,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           </View>
         )}
 
-        {/* View Mode Toggle & Filters */}
+        {/* Sort & Filter Controls */}
         <View style={styles.controlsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginRight: 8 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
             <TouchableOpacity
               style={[
                 styles.filterChip,
@@ -290,22 +225,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
               </View>
             </TouchableOpacity>
           </ScrollView>
-
-          {/* View Mode Icons */}
-          <View style={[styles.toggleWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'list' && { backgroundColor: colors.background }]}
-              onPress={() => setViewMode('list')}
-            >
-              <LayoutList size={16} color={viewMode === 'list' ? colors.primary : colors.textMuted} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'swipe' && { backgroundColor: colors.background }]}
-              onPress={() => setViewMode('swipe')}
-            >
-              <BookCopy size={16} color={viewMode === 'swipe' ? colors.primary : colors.textMuted} />
-            </TouchableOpacity>
-          </View>
         </View>
 
         {/* Active Filters Row */}
@@ -350,7 +269,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textMuted }]}>Fetching research papers...</Text>
         </View>
-      ) : viewMode === 'list' ? (
+      ) : (
         <FlatList<Paper>
           data={filteredPapers}
           keyExtractor={(item: Paper) => item.id}
@@ -362,6 +281,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                 onSelectPaper(item.id);
               }}
               onToggleSave={() => handleToggleSave(item.id)}
+              onAddToProject={() => handleOpenProjectSelector(item)}
             />
           )}
           contentContainerStyle={styles.listContent}
@@ -459,102 +379,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             )
           }
         />
-      ) : (
-        <View style={styles.swipeContainer}>
-          <Text style={[styles.swipeInstruction, { color: colors.textMuted }]}>
-            Swipe left/right to browse abstracts • Tap card to save
-          </Text>
-          <FlatList<Paper>
-            data={filteredPapers}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(item: Paper) => item.id}
-            renderItem={renderSwipeCard}
-            contentContainerStyle={styles.swipeListContent}
-            onEndReached={() => {
-              if (hasMore && !loadingMore && !loading) {
-                loadMore();
-              }
-            }}
-            onEndReachedThreshold={0.5}
-            ListFooterComponent={
-              hasMore && filteredPapers.length > 0 ? (
-                <View style={[styles.swipeCardContainer, { width: screenWidth }]}>
-                  <View style={[styles.swipeCard, styles.swipeLoadMoreCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <View style={{ alignItems: 'center', marginVertical: 'auto' }}>
-                      <Sparkles size={42} color={colors.primary} style={{ marginBottom: 16 }} />
-                      <Text style={[styles.swipeLoadMoreTitle, { color: colors.text }]}>
-                        {loadingMore ? 'Fetching Next Batch...' : 'Want to explore more?'}
-                      </Text>
-                      <Text style={[styles.swipeLoadMoreSub, { color: colors.textMuted }]}>
-                        {loadingMore
-                          ? 'Loading 10 additional research papers from OpenAlex & Semantic Scholar...'
-                          : `You've viewed ${filteredPapers.length} papers. Tap below to load 10 more papers.`}
-                      </Text>
-                      <TouchableOpacity
-                        style={[styles.swipeLoadMoreActionBtn, { backgroundColor: colors.primary, opacity: loadingMore ? 0.6 : 1 }]}
-                        disabled={loadingMore}
-                        onPress={() => loadMore()}
-                        activeOpacity={0.85}
-                      >
-                        {loadingMore ? (
-                          <ActivityIndicator size="small" color={primaryBtnTextColor} />
-                        ) : (
-                          <Text style={[styles.swipeLoadMoreActionBtnText, { color: primaryBtnTextColor }]}>
-                            Load 10 More Papers
-                          </Text>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-              ) : !hasMore && filteredPapers.length > 0 ? (
-                <View style={[styles.swipeCardContainer, { width: screenWidth }]}>
-                  <View style={[styles.swipeCard, styles.swipeLoadMoreCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <View style={{ alignItems: 'center', marginVertical: 'auto' }}>
-                      <Check size={42} color={colors.primary} style={{ marginBottom: 16 }} />
-                      <Text style={[styles.swipeLoadMoreTitle, { color: colors.text }]}>
-                        All Papers Loaded!
-                      </Text>
-                      <Text style={[styles.swipeLoadMoreSub, { color: colors.textMuted }]}>
-                        You have viewed all {filteredPapers.length} available papers for this search.
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ) : undefined
-            }
-            ListEmptyComponent={
-              <View style={[styles.emptyState, { width: screenWidth - 32, marginHorizontal: 16 }]}>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  {searchQuery.length === 0
-                    ? 'Search for research'
-                    : activeFilterCount > 0
-                    ? 'No papers match filters'
-                    : 'No papers found'}
-                </Text>
-                <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-                  {searchQuery.length === 0
-                    ? 'Type in the search bar above to discover interesting research papers.'
-                    : activeFilterCount > 0
-                    ? 'Try adjusting or clearing your author/year filters.'
-                    : 'Try adjusting your search terms to find papers.'}
-                </Text>
-                {activeFilterCount > 0 && (
-                  <TouchableOpacity
-                    style={[styles.resetFilterBtn, { backgroundColor: colors.primary }]}
-                    onPress={clearFilters}
-                  >
-                    <Text style={[styles.resetFilterBtnText, { color: primaryBtnTextColor }]}>
-                      Clear Active Filters
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            }
-          />
-        </View>
       )}
 
       {/* Author & Year Filter Modal */}
@@ -837,16 +661,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textDecorationLine: 'underline',
   },
-  toggleWrapper: {
-    flexDirection: 'row',
-    borderRadius: 8,
-    padding: 2,
-    borderWidth: 1,
-  },
-  toggleBtn: {
-    padding: 6,
-    borderRadius: 6,
-  },
   listContent: {
     padding: 16,
     paddingTop: 4,
@@ -903,37 +717,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  swipeLoadMoreCard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-    textAlign: 'center',
-  },
-  swipeLoadMoreTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  swipeLoadMoreSub: {
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  swipeLoadMoreActionBtn: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 200,
-  },
-  swipeLoadMoreActionBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-  },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -958,106 +741,6 @@ const styles = StyleSheet.create({
   resetFilterBtnText: {
     fontSize: 13,
     fontWeight: '700',
-  },
-  swipeContainer: {
-    flex: 1,
-    paddingBottom: 10,
-  },
-  swipeInstruction: {
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginVertical: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  swipeListContent: {
-    paddingVertical: 4,
-  },
-  swipeCardContainer: {
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  swipeCard: {
-    width: screenWidth - 32,
-    height: Math.min(Math.max(screenHeight * 0.56, 420), 520),
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
-    justifyContent: 'space-between',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  badge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginRight: 8,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 4,
-  },
-  saveIcon: {
-    marginLeft: 'auto',
-    padding: 4,
-  },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 24,
-    marginBottom: 4,
-  },
-  cardAuthors: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  abstractContainer: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 14,
-    minHeight: 120,
-  },
-  abstractHeaderLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-  },
-  abstractText: {
-    fontSize: 14,
-    lineHeight: 22,
-    letterSpacing: 0.1,
-  },
-  actionBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 10,
-    marginBottom: 4,
-  },
-  actionBtnText: {
-    color: '#000000',
-    fontSize: 14,
-    fontWeight: '700',
-    marginLeft: 6,
   },
   modalOverlay: {
     flex: 1,

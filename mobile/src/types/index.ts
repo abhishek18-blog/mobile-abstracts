@@ -27,6 +27,7 @@ export interface ExternalPaper {
   pdfUrl: string | null;
   doi: string | null;
   source: string;
+  tags?: string[];
 }
 
 export interface AbstractHighlight {
