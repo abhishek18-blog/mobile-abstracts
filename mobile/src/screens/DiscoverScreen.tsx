@@ -28,9 +28,10 @@ import {
   Check,
   User,
   AlertCircle,
+  WifiOff,
 } from 'lucide-react-native';
 import { Paper, ExternalPaper, Project } from '../types';
-import { papersApi, searchApi, projectsApi, cachePapers } from '../services/api';
+import { papersApi, searchApi, projectsApi, cachePapers, getAbstractText } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
 import { useTheme } from '../context/ThemeContext';
 import { useSearch } from '../context/SearchContext';
@@ -148,33 +149,44 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
         <View style={[styles.swipeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {/* Card Header info */}
           <View style={styles.cardHeaderRow}>
-            <View style={[styles.badge, { backgroundColor: colors.background }]}>
-              <Calendar size={12} color={colors.primary} />
-              <Text style={[styles.badgeText, { color: colors.text }]}>{item.year || '2024'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, flexWrap: 'wrap' }}>
+              <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
+                <Calendar size={12} color={colors.primary} />
+                <Text style={[styles.badgeText, { color: colors.text }]}>{item.year || '2024'}</Text>
+              </View>
+
+              <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
+                <Award size={12} color={colors.primary} />
+                <Text style={[styles.badgeText, { color: colors.text }]}>{item.citations || 0} Citations</Text>
+              </View>
+
+              {item.tags && item.tags.length > 0 && (
+                <View style={[styles.badge, { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }]}>
+                  <Text style={[styles.badgeText, { color: colors.textMuted }]}>{item.tags[0]}</Text>
+                </View>
+              )}
             </View>
 
-            <View style={[styles.badge, { backgroundColor: colors.background }]}>
-              <Award size={12} color={colors.primary} />
-              <Text style={[styles.badgeText, { color: colors.text }]}>{item.citations || 0} Citations</Text>
-            </View>
-
-            <TouchableOpacity onPress={() => handleToggleSave(item.id)} style={styles.saveIcon}>
+            <TouchableOpacity onPress={() => handleToggleSave(item.id)} style={styles.saveIcon} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
               <Bookmark size={20} color={item.saved ? colors.primary : colors.textMuted} fill={item.saved ? colors.primary : 'transparent'} />
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={3}>
-            {item.title}
-          </Text>
+          <TouchableOpacity onPress={() => onSelectPaper(item.id)} activeOpacity={0.8}>
+            <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={3}>
+              {item.title}
+            </Text>
+          </TouchableOpacity>
 
           <Text style={[styles.cardAuthors, { color: colors.primary }]} numberOfLines={1}>
-            {item.authors ? item.authors.join(', ') : 'Unknown'}
+            {item.authors ? item.authors.join(', ') : 'Unknown Authors'}
           </Text>
 
-          {/* Abstract Scroll Area */}
+          {/* Complete Abstract Scroll Area */}
           <View style={[styles.abstractContainer, { backgroundColor: colors.background, borderColor: colors.border }]}>
+            <Text style={[styles.abstractHeaderLabel, { color: colors.textMuted }]}>Original Publication Abstract</Text>
             <ScrollView showsVerticalScrollIndicator={true} nestedScrollEnabled={true}>
-              <Text style={[styles.abstractText, { color: colors.text }]}>{item.abstract}</Text>
+              <Text selectable style={[styles.abstractText, { color: colors.text }]}>{getAbstractText(item)}</Text>
             </ScrollView>
           </View>
 
@@ -182,9 +194,10 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: colors.primary }]}
             onPress={() => handleOpenProjectSelector(item)}
+            activeOpacity={0.85}
           >
-            <FolderPlus size={18} color="#ffffff" />
-            <Text style={styles.actionBtnText}>Tap to Add to Project</Text>
+            <FolderPlus size={18} color={primaryBtnTextColor} />
+            <Text style={[styles.actionBtnText, { color: primaryBtnTextColor }]}>Tap to Add to Project</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -192,7 +205,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.headerContainer}>
         <View style={styles.headerTitleRow}>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Discover Research</Text>
@@ -210,6 +223,16 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           />
         </View>
 
+        {/* Offline Banner — shown when cached results are displayed */}
+        {searchError && papers.length > 0 && (
+          <View style={[styles.offlineBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <WifiOff size={14} color={colors.textMuted} />
+            <Text style={[styles.offlineBannerText, { color: colors.textMuted }]}>
+              You're offline — showing cached results
+            </Text>
+          </View>
+        )}
+
         {/* View Mode Toggle & Filters */}
         <View style={styles.controlsRow}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginRight: 8 }}>
@@ -226,7 +249,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                 { color: colors.textMuted },
                 selectedSort === 'most_cited' && { color: colors.primary, fontWeight: '700' }
               ]}>
-                🔥 Most Cited
+                Most Cited
               </Text>
             </TouchableOpacity>
 
@@ -243,7 +266,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                 { color: colors.textMuted },
                 selectedSort === 'most_recent' && { color: colors.primary, fontWeight: '700' }
               ]}>
-                ⚡ Most Recent
+                Most Recent
               </Text>
             </TouchableOpacity>
 
@@ -334,7 +357,10 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           renderItem={({ item }: { item: Paper }) => (
             <PaperCard
               paper={item}
-              onPress={() => onSelectPaper(item.id)}
+              onPress={() => {
+                cachePapers([item]);
+                onSelectPaper(item.id);
+              }}
               onToggleSave={() => handleToggleSave(item.id)}
             />
           )}
@@ -382,7 +408,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                   ✨ All available research papers loaded ({filteredPapers.length} papers)
                 </Text>
               </View>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             searchError ? (
@@ -497,7 +523,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
                     </View>
                   </View>
                 </View>
-              ) : null
+              ) : undefined
             }
             ListEmptyComponent={
               <View style={[styles.emptyState, { width: screenWidth - 32, marginHorizontal: 16 }]}>
@@ -746,6 +772,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 12,
   },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+    gap: 6,
+  },
+  offlineBannerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+  },
   searchInput: {
     flex: 1,
     marginLeft: 8,
@@ -986,15 +1027,23 @@ const styles = StyleSheet.create({
   },
   abstractContainer: {
     flex: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    padding: 12,
+    padding: 14,
     marginBottom: 14,
-    minHeight: 80,
+    minHeight: 120,
+  },
+  abstractHeaderLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 8,
   },
   abstractText: {
     fontSize: 14,
-    lineHeight: 20,
+    lineHeight: 22,
+    letterSpacing: 0.1,
   },
   actionBtn: {
     flexDirection: 'row',

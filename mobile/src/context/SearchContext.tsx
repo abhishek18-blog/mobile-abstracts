@@ -1,6 +1,41 @@
 import React, { createContext, useContext, useState, useRef, useMemo, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Paper, ExternalPaper } from '../types';
 import { searchApi, cachePapers } from '../services/api';
+
+// ─── Offline Cache Keys ──────────────────────────────────────────────────────
+const SEARCH_CACHE_PREFIX = '@search_cache:';
+const SEARCH_CACHE_META_KEY = '@search_cache_meta';
+const MAX_CACHED_QUERIES = 10; // keep last 10 unique searches
+
+async function saveSearchToStorage(query: string, sort: string, papers: Paper[], total: number) {
+  try {
+    const key = `${SEARCH_CACHE_PREFIX}${query}:${sort}`;
+    await AsyncStorage.setItem(key, JSON.stringify({ papers, total, savedAt: Date.now() }));
+    // Track query list for cache eviction
+    const metaRaw = await AsyncStorage.getItem(SEARCH_CACHE_META_KEY);
+    let queries: string[] = metaRaw ? JSON.parse(metaRaw) : [];
+    queries = queries.filter((q) => q !== key);
+    queries.unshift(key);
+    if (queries.length > MAX_CACHED_QUERIES) {
+      const removed = queries.splice(MAX_CACHED_QUERIES);
+      await Promise.all(removed.map((k) => AsyncStorage.removeItem(k)));
+    }
+    await AsyncStorage.setItem(SEARCH_CACHE_META_KEY, JSON.stringify(queries));
+  } catch {}
+}
+
+async function loadSearchFromStorage(query: string, sort: string): Promise<{ papers: Paper[]; total: number } | null> {
+  try {
+    const key = `${SEARCH_CACHE_PREFIX}${query}:${sort}`;
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+    const { papers, total } = JSON.parse(raw);
+    return { papers, total };
+  } catch {
+    return null;
+  }
+}
 
 interface SearchContextType {
   searchQuery: string;
@@ -49,6 +84,39 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeQueryRef = useRef<string>('');
   const loadingMoreRef = useRef<boolean>(false);
 
+  // ── Preload cached papers on mount so Discover is immediately populated offline ──
+  useEffect(() => {
+    const initDefaultPapers = async () => {
+      try {
+        const metaRaw = await AsyncStorage.getItem(SEARCH_CACHE_META_KEY);
+        if (metaRaw) {
+          const queries: string[] = JSON.parse(metaRaw);
+          if (queries.length > 0) {
+            const raw = await AsyncStorage.getItem(queries[0]);
+            if (raw) {
+              const { papers: cachedList, total: cachedTotal } = JSON.parse(raw);
+              if (Array.isArray(cachedList) && cachedList.length > 0 && !activeQueryRef.current) {
+                cachePapers(cachedList);
+                setPapers(cachedList);
+                setTotal(cachedTotal || cachedList.length);
+                setHasMore(false);
+                return;
+              }
+            }
+          }
+        }
+        const { MOCK_PAPERS } = await import('../services/api');
+        if (!activeQueryRef.current) {
+          cachePapers(MOCK_PAPERS);
+          setPapers(MOCK_PAPERS);
+          setTotal(MOCK_PAPERS.length);
+          setHasMore(false);
+        }
+      } catch {}
+    };
+    initDefaultPapers();
+  }, []);
+
   const extractAuthorsAndYears = (paperList: Paper[]) => {
     const authorsSet = new Set<string>();
     const yearsSet = new Set<string>();
@@ -80,12 +148,34 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const trimmed = query.trim();
     if (!trimmed) {
       activeQueryRef.current = '';
-      setPapers([]);
       setLoading(false);
       setOffset(0);
-      setTotal(0);
-      setHasMore(false);
       setSearchError(null);
+      // Reload initial cached papers or default papers so screen is not blank
+      try {
+        const metaRaw = await AsyncStorage.getItem(SEARCH_CACHE_META_KEY);
+        if (metaRaw) {
+          const queries: string[] = JSON.parse(metaRaw);
+          if (queries.length > 0) {
+            const raw = await AsyncStorage.getItem(queries[0]);
+            if (raw) {
+              const { papers: cachedList, total: cachedTotal } = JSON.parse(raw);
+              if (Array.isArray(cachedList) && cachedList.length > 0) {
+                setPapers(cachedList);
+                setTotal(cachedTotal || cachedList.length);
+                setHasMore(false);
+                return;
+              }
+            }
+          }
+        }
+        const { MOCK_PAPERS } = await import('../services/api');
+        setPapers(MOCK_PAPERS);
+        setTotal(MOCK_PAPERS.length);
+        setHasMore(false);
+      } catch {
+        setPapers([]);
+      }
       return;
     }
 
@@ -93,6 +183,19 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setLoading(true);
     setSearchError(null);
     setOffset(0);
+
+    // ── Load cached results immediately so UI is not blank offline ──
+    const cached = await loadSearchFromStorage(trimmed, sort);
+    if (cached && cached.papers.length > 0) {
+      if (activeQueryRef.current === trimmed) {
+        cachePapers(cached.papers);
+        setPapers(cached.papers);
+        setTotal(cached.total);
+        setHasMore(cached.papers.length < cached.total);
+        setSearchError(null);
+        setLoading(false); // show cached data instantly
+      }
+    }
 
     try {
       const res = await searchApi.searchPapers(trimmed, 10, 0, { sort });
@@ -125,17 +228,56 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setTotal(totalRes);
           setHasMore(converted.length > 0 && converted.length < totalRes);
           setSearchError(null);
+
+          // ── Persist fresh results for offline use ──
+          saveSearchToStorage(trimmed, sort, converted, totalRes);
         } else {
-          setPapers([]);
-          setHasMore(false);
-          setSearchError((res as any).error || 'Failed to fetch research papers. Live search endpoints unavailable.');
+          // If live search returned no data, check local offline matches
+          const { MOCK_PAPERS, paperCache } = await import('../services/api');
+          const allAvailable = Array.from(new Set([...Array.from(paperCache.values()), ...MOCK_PAPERS]));
+          const qLower = trimmed.toLowerCase();
+          const offlineMatches = allAvailable.filter(
+            (p) =>
+              p.title?.toLowerCase().includes(qLower) ||
+              (p.abstract && p.abstract.toLowerCase().includes(qLower)) ||
+              p.tags?.some((t) => t.toLowerCase().includes(qLower)) ||
+              p.authors?.some((a) => a.toLowerCase().includes(qLower))
+          );
+          if (offlineMatches.length > 0) {
+            setPapers(offlineMatches);
+            setTotal(offlineMatches.length);
+            setHasMore(false);
+            setSearchError('Offline — showing matching cached & saved papers.');
+          } else if (!cached || cached.papers.length === 0) {
+            setPapers([]);
+            setHasMore(false);
+            setSearchError((res as any).error || 'Failed to fetch research papers. Live search endpoints unavailable.');
+          }
         }
       }
     } catch (err: any) {
       console.warn('[SearchContext] Background search error:', err);
-      setSearchError(err?.message || 'Error fetching papers. Please check network connection.');
-      setPapers([]);
-      setHasMore(false);
+      // Try searching offline papers (from cachePapers / MOCK_PAPERS / persistent storage)
+      const { MOCK_PAPERS, paperCache } = await import('../services/api');
+      const allAvailable = Array.from(new Set([...Array.from(paperCache.values()), ...MOCK_PAPERS]));
+      const qLower = trimmed.toLowerCase();
+      const offlineMatches = allAvailable.filter(
+        (p) =>
+          p.title?.toLowerCase().includes(qLower) ||
+          (p.abstract && p.abstract.toLowerCase().includes(qLower)) ||
+          p.tags?.some((t) => t.toLowerCase().includes(qLower)) ||
+          p.authors?.some((a) => a.toLowerCase().includes(qLower))
+      );
+      if (offlineMatches.length > 0) {
+        setPapers(offlineMatches);
+        setTotal(offlineMatches.length);
+        setHasMore(false);
+        setSearchError('Offline — showing matching cached & saved papers.');
+      } else if (!cached || cached.papers.length === 0) {
+        setSearchError('You are offline. Connect to internet to search global research databases.');
+        setPapers([]);
+        setHasMore(false);
+      }
     } finally {
       if (activeQueryRef.current === trimmed) {
         setLoading(false);

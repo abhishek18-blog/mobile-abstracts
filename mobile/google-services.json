@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "931572785260",
+    "project_id": "abstracts-8a3a2",
+    "storage_bucket": "abstracts-8a3a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:931572785260:android:0e7ae7850ebd62a6dab849",
+        "android_client_info": {
+          "package_name": "com.abstracts.researchhub"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "931572785260-j1kj5gc5611h9j2c8p7ar47n17noqto3.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjMkt_-TKVFLsxf7xRTbASjJuxPe0R04E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "931572785260-j1kj5gc5611h9j2c8p7ar47n17noqto3.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -6,8 +6,8 @@ import {
   Animated,
   Easing,
   Dimensions,
-  StatusBar,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { Sparkles, Brain, Compass, BookOpen } from 'lucide-react-native';
 import { AbstractsLogo } from '../components/AbstractsLogo';
 
@@ -119,7 +119,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinish }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#070a14" translucent={false} />
+      <StatusBar style="light" />
 
       {/* Deep Space Background Glows */}
       <View style={styles.bgBase} />
@@ -210,7 +210,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bgBase: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#070a14',
   },
   glowPrimary: {

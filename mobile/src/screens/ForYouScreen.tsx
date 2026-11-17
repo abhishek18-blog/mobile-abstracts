@@ -10,14 +10,39 @@ import {
   Modal,
   TextInput,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Compass, Sparkles, Plus, X } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Compass, Sparkles, Plus, X, WifiOff } from 'lucide-react-native';
 import { Paper } from '../types';
 import { recommendationApi, papersApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
+
+// ─── Offline Cache Helpers ───────────────────────────────────────────────────
+const REC_CACHE_PREFIX = '@rec_cache:';
+
+async function saveRecsToStorage(topic: string, papers: Paper[]) {
+  try {
+    await AsyncStorage.setItem(
+      `${REC_CACHE_PREFIX}${topic}`,
+      JSON.stringify({ papers, savedAt: Date.now() })
+    );
+  } catch {}
+}
+
+async function loadRecsFromStorage(topic: string): Promise<Paper[] | null> {
+  try {
+    const raw = await AsyncStorage.getItem(`${REC_CACHE_PREFIX}${topic}`);
+    if (!raw) return null;
+    const { papers } = JSON.parse(raw);
+    return Array.isArray(papers) && papers.length > 0 ? papers : null;
+  } catch {
+    return null;
+  }
+}
 
 const AVAILABLE_INTERESTS = [
   'Machine Learning',
@@ -44,7 +69,9 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
   const [selectedInterest, setSelectedInterest] = useState<string>('');
   const [papers, setPapers] = useState<Paper[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [apiSource, setApiSource] = useState<string>('');
+  const [isOffline, setIsOffline] = useState<boolean>(false);
 
   // Setup interest states (for skipped onboarding)
   const [availableInterests, setAvailableInterests] = useState<string[]>(AVAILABLE_INTERESTS);
@@ -63,32 +90,67 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
     }
   }, [interests]);
 
-  useEffect(() => {
+  const loadRecommendations = async (isRefresh = false) => {
     if (!selectedInterest) return;
 
-    const fetchForYou = async () => {
+    if (isRefresh) {
+      setRefreshing(true);
+      recommendationApi.clearCache(selectedInterest);
+    } else {
       setLoading(true);
-      setPapers([]);
-      setApiSource('');
+    }
 
-      try {
-        // Use 2-tier recommendation API (Semantic Scholar → OpenAlex)
-        const results = await recommendationApi.getRecommendations(selectedInterest, 15);
-        if (results.length > 0) {
-          cachePapers(results);
-          setPapers(results);
-          // Determine source from the first paper's tag
-          const src = results[0]?.tags?.[0] || 'External';
-          setApiSource(src);
-        }
-      } catch (err) {
-        console.warn('Failed to fetch recommendations:', err);
-      } finally {
-        setLoading(false);
+    setIsOffline(false);
+
+    // ── Load cached papers immediately so screen is not blank offline ──
+    if (!isRefresh) {
+      const cached = await loadRecsFromStorage(selectedInterest);
+      if (cached) {
+        cachePapers(cached);
+        setPapers(cached);
+        setApiSource('Cached (Offline)');
+        setLoading(false); // show cached instantly, then try network below
       }
-    };
+    }
 
-    fetchForYou();
+    try {
+      const results = await recommendationApi.getRecommendations(selectedInterest, 15);
+      if (results.length > 0) {
+        cachePapers(results);
+        setPapers(results);
+        const src = results[0]?.tags?.[0] || 'External';
+        setApiSource(src);
+        setIsOffline(false);
+        // ── Persist fresh results for next offline session ──
+        saveRecsToStorage(selectedInterest, results);
+      } else {
+        // No live results — if we have nothing displayed, check storage
+        const cached = await loadRecsFromStorage(selectedInterest);
+        if (cached) {
+          cachePapers(cached);
+          setPapers(cached);
+          setApiSource('Cached (Offline)');
+          setIsOffline(true);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch recommendations:', err);
+      // Try storage fallback on network error
+      const cached = await loadRecsFromStorage(selectedInterest);
+      if (cached) {
+        cachePapers(cached);
+        setPapers(cached);
+        setApiSource('Cached (Offline)');
+        setIsOffline(true);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecommendations(false);
   }, [selectedInterest]);
 
   const handleToggleSave = async (paperId: string) => {
@@ -131,7 +193,7 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
     const isValid = setupInterests.length >= 1 && setupInterests.length <= 4;
 
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
         <ScrollView contentContainerStyle={styles.scrollSetup}>
           <View style={styles.setupContainer}>
             <Sparkles size={40} color={colors.primary} style={styles.setupIcon} />
@@ -253,6 +315,16 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
         <Compass size={22} color={colors.primary} />
       </View>
 
+      {/* Offline Banner */}
+      {isOffline && (
+        <View style={[styles.offlineBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <WifiOff size={14} color={colors.textMuted} />
+          <Text style={[styles.offlineBannerText, { color: colors.textMuted }]}>
+            You're offline — showing cached recommendations
+          </Text>
+        </View>
+      )}
+
       {/* Horizontal topic pills */}
       <ScrollView
         horizontal
@@ -293,7 +365,7 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
   );
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
       {loading ? (
         <>
           {ListHeader}
@@ -309,6 +381,13 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
           data={papers}
           keyExtractor={(item: Paper) => item.id}
           ListHeaderComponent={ListHeader}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => loadRecommendations(true)}
+              tintColor={colors.primary}
+            />
+          }
           renderItem={({ item }: { item: Paper }) => (
             <PaperCard
               paper={item}
@@ -379,6 +458,21 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginTop: 8,
     textAlign: 'right',
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+    gap: 6,
+  },
+  offlineBannerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
   },
   loadingText: {
     marginTop: 12,

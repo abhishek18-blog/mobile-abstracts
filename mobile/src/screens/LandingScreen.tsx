@@ -4,11 +4,11 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  StatusBar,
   Dimensions,
   Animated,
   ScrollView,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   ArrowRight,
@@ -72,7 +72,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#070a14" translucent={false} />
+      <StatusBar style="light" />
 
       {/* Deep Space Background Glows (Matching Web App) */}
       <View style={styles.bgBase} />
@@ -291,7 +291,7 @@ const styles = StyleSheet.create({
 
   // Deep Space Ambient Glow Background Effects
   bgBase: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#070a14',
   },
   glowIndigo: {

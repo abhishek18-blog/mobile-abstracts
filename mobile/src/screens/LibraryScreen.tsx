@@ -12,11 +12,35 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Folder, Bookmark, Plus, BookMarked, X, ArrowLeft, Trash2 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Folder, Bookmark, Plus, BookMarked, X, ArrowLeft, Trash2, WifiOff, ChevronRight } from 'lucide-react-native';
 import { Paper, Project } from '../types';
 import { papersApi, projectsApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
 import { useTheme } from '../context/ThemeContext';
+
+// ─── Offline Cache Keys ──────────────────────────────────────────────────────
+const SAVED_PAPERS_CACHE_KEY = '@library_saved_papers';
+const PROJECTS_CACHE_KEY = '@library_projects';
+
+async function savePapersToStorage(papers: Paper[]) {
+  try { await AsyncStorage.setItem(SAVED_PAPERS_CACHE_KEY, JSON.stringify(papers)); } catch {}
+}
+async function saveProjectsToStorage(projects: Project[]) {
+  try { await AsyncStorage.setItem(PROJECTS_CACHE_KEY, JSON.stringify(projects)); } catch {}
+}
+async function loadPapersFromStorage(): Promise<Paper[]> {
+  try {
+    const raw = await AsyncStorage.getItem(SAVED_PAPERS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+async function loadProjectsFromStorage(): Promise<Project[]> {
+  try {
+    const raw = await AsyncStorage.getItem(PROJECTS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
 
 interface LibraryScreenProps {
   onSelectPaper: (paperId: string) => void;
@@ -38,6 +62,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   // Selected project details view state
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -50,20 +75,49 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
   const [selectedColor, setSelectedColor] = useState(PROJECT_COLORS[0]);
 
   const loadLibraryData = async () => {
+    setIsOffline(false);
     try {
       if (activeSegment === 'saved') {
+        // ── Show cached instantly ──
+        const cachedPapers = await loadPapersFromStorage();
+        if (cachedPapers.length > 0) {
+          setSavedPapers(cachedPapers);
+          cachePapers(cachedPapers);
+          setLoading(false);
+        }
+        // ── Fetch fresh from network ──
         const res = await papersApi.getAll({ saved_by: 'true' });
-        if (res.success) {
+        if (res.success && res.data) {
           setSavedPapers(res.data);
+          cachePapers(res.data);
+          savePapersToStorage(res.data); // persist for offline
         }
       } else {
+        // ── Show cached instantly ──
+        const cachedProjects = await loadProjectsFromStorage();
+        if (cachedProjects.length > 0) {
+          setProjects(cachedProjects);
+          setLoading(false);
+        }
+        // ── Fetch fresh from network ──
         const res = await projectsApi.getAll();
-        if (res.success) {
+        if (res.success && res.data) {
           setProjects(res.data);
+          saveProjectsToStorage(res.data); // persist for offline
         }
       }
     } catch (err) {
-      console.warn('Failed to fetch library:', err);
+      console.warn('Failed to fetch library (offline fallback active):', err);
+      setIsOffline(true);
+      // Fallback: load from storage if network fails and nothing displayed yet
+      if (activeSegment === 'saved' && savedPapers.length === 0) {
+        const cached = await loadPapersFromStorage();
+        setSavedPapers(cached);
+        cachePapers(cached);
+      } else if (activeSegment === 'projects' && projects.length === 0) {
+        const cached = await loadProjectsFromStorage();
+        setProjects(cached);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -101,7 +155,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
     try {
       const res = await papersApi.toggleSave(paperId);
       if (res.success && res.data) {
-        setSavedPapers((prev) => prev.filter((p) => p.id !== paperId));
+        const updated = savedPapers.filter((p) => p.id !== paperId);
+        setSavedPapers(updated);
+        savePapersToStorage(updated); // keep cache in sync
         setProjectPapers((prev) =>
           prev.map((p) => (p.id === paperId ? { ...p, saved: res.data?.saved } : p))
         );
@@ -170,7 +226,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
   const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={[styles.title, { color: colors.text }]}>My Library</Text>
@@ -184,6 +240,16 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
             </TouchableOpacity>
           )}
         </View>
+
+        {/* Offline Banner */}
+        {isOffline && (
+          <View style={[styles.offlineBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <WifiOff size={14} color={colors.textMuted} />
+            <Text style={[styles.offlineBannerText, { color: colors.textMuted }]}>
+              You're offline — showing cached library data
+            </Text>
+          </View>
+        )}
         
         {/* Segment Control - only show if not viewing project details */}
         {!selectedProject && (
@@ -340,13 +406,30 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
             >
               <View style={[styles.colorIndicator, { backgroundColor: item.color || '#3b82f6' }]} />
               <View style={styles.projectMain}>
-                <Text style={[styles.projectName, { color: colors.text }]}>{item.name}</Text>
-                <Text style={[styles.projectDesc, { color: colors.textMuted }]} numberOfLines={2}>
-                  {item.description || 'No project description'}
-                </Text>
+                <View style={styles.projectNameRow}>
+                  <Text style={[styles.projectName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
+                  <ChevronRight size={16} color={colors.textMuted} />
+                </View>
+                {item.description ? (
+                  <Text style={[styles.projectDesc, { color: colors.textMuted }]} numberOfLines={2}>
+                    {item.description}
+                  </Text>
+                ) : null}
                 <View style={styles.projectMeta}>
                   <Text style={[styles.projectMetaText, { color: colors.primary }]}>{item.paperCount || 0} papers</Text>
                   <Text style={[styles.projectMetaText, { color: colors.primary }]}>{item.progress || 0}% complete</Text>
+                </View>
+                {/* Visual Progress Bar */}
+                <View style={[styles.progressBarBg, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  <View 
+                    style={[
+                      styles.progressBarFill, 
+                      { 
+                        backgroundColor: item.color || '#3b82f6', 
+                        width: `${Math.min(100, Math.max((item.progress || 0) > 0 ? 5 : 0, item.progress || 0))}%` 
+                      }
+                    ]} 
+                  />
                 </View>
               </View>
             </TouchableOpacity>
@@ -444,6 +527,21 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 8,
   },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 8,
+    gap: 6,
+  },
+  offlineBannerText: {
+    fontSize: 12,
+    fontWeight: '500',
+    flex: 1,
+  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -510,9 +608,15 @@ const styles = StyleSheet.create({
   projectMain: {
     flex: 1,
   },
+  projectNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   projectName: {
     fontSize: 16,
     fontWeight: '700',
+    flex: 1,
   },
   projectDesc: {
     fontSize: 13,
@@ -521,11 +625,22 @@ const styles = StyleSheet.create({
   projectMeta: {
     flexDirection: 'row',
     marginTop: 8,
+    marginBottom: 8,
   },
   projectMetaText: {
     fontSize: 12,
     fontWeight: '600',
     marginRight: 16,
+  },
+  progressBarBg: {
+    height: 5,
+    borderRadius: 3,
+    borderWidth: 0.5,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 3,
   },
   emptyState: {
     alignItems: 'center',

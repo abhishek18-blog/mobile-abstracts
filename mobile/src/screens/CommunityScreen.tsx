@@ -374,8 +374,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       ) : selectedCommunity ? (
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
         >
           {/* Active Group Chat Banner */}
           <View style={[styles.banner, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>

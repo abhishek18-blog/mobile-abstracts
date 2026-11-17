@@ -72,129 +72,72 @@ export const AppNavigator: React.FC = () => {
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'discover':
-        return <DiscoverScreen onSelectPaper={(id) => setSelectedPaperId(id)} />;
+        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
       case 'library':
-        return <LibraryScreen onSelectPaper={(id) => setSelectedPaperId(id)} />;
+        return <LibraryScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
       case 'foryou':
-        return <ForYouScreen onSelectPaper={(id) => setSelectedPaperId(id)} />;
+        return <ForYouScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
       case 'community':
-        return <CommunityScreen onSelectPaper={(id) => setSelectedPaperId(id)} />;
+        return <CommunityScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
       case 'settings':
         return <SettingsScreen />;
       default:
-        return <DiscoverScreen onSelectPaper={(id) => setSelectedPaperId(id)} />;
+        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
     }
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} backgroundColor={colors.background} />
+      <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
       {/* Screen Body */}
       <View style={styles.screenContainer}>{renderActiveScreen()}</View>
 
       {/* Bottom Navigation Bar */}
       <View style={[
-        styles.bottomNav, 
-        { 
-          paddingBottom: Math.max(insets.bottom, 12), 
+        styles.bottomNav,
+        {
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
           backgroundColor: colors.card,
           borderTopColor: colors.border
         }
       ]}>
-        <TouchableOpacity
-          style={styles.navTab}
-          onPress={() => setActiveTab('discover')}
-        >
-          <Search
-            size={22}
-            color={activeTab === 'discover' ? colors.primary : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.navLabel,
-              { color: colors.textMuted },
-              activeTab === 'discover' && { color: colors.primary, fontWeight: '700' },
-            ]}
-          >
-            Discover
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navTab}
-          onPress={() => setActiveTab('library')}
-        >
-          <Bookmark
-            size={22}
-            color={activeTab === 'library' ? colors.primary : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.navLabel,
-              { color: colors.textMuted },
-              activeTab === 'library' && { color: colors.primary, fontWeight: '700' },
-            ]}
-          >
-            Library
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navTab}
-          onPress={() => setActiveTab('foryou')}
-        >
-          <Compass
-            size={22}
-            color={activeTab === 'foryou' ? colors.primary : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.navLabel,
-              { color: colors.textMuted },
-              activeTab === 'foryou' && { color: colors.primary, fontWeight: '700' },
-            ]}
-          >
-            For You
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navTab}
-          onPress={() => setActiveTab('community')}
-        >
-          <Users
-            size={22}
-            color={activeTab === 'community' ? colors.primary : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.navLabel,
-              { color: colors.textMuted },
-              activeTab === 'community' && { color: colors.primary, fontWeight: '700' },
-            ]}
-          >
-            Groups
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.navTab}
-          onPress={() => setActiveTab('settings')}
-        >
-          <Settings
-            size={22}
-            color={activeTab === 'settings' ? colors.primary : colors.textMuted}
-          />
-          <Text
-            style={[
-              styles.navLabel,
-              { color: colors.textMuted },
-              activeTab === 'settings' && { color: colors.primary, fontWeight: '700' },
-            ]}
-          >
-            Settings
-          </Text>
-        </TouchableOpacity>
+        {[
+          { tab: 'discover', label: 'Discover', Icon: Search },
+          { tab: 'library', label: 'Library', Icon: Bookmark },
+          { tab: 'foryou', label: 'For You', Icon: Compass },
+          { tab: 'community', label: 'Groups', Icon: Users },
+          { tab: 'settings', label: 'Settings', Icon: Settings },
+        ].map(({ tab, label, Icon }) => {
+          const isActive = activeTab === tab;
+          return (
+            <TouchableOpacity
+              key={tab}
+              style={styles.navTab}
+              onPress={() => setActiveTab(tab as TabName)}
+              activeOpacity={0.7}
+            >
+              <View style={[
+                styles.iconContainer,
+                isActive && { backgroundColor: colors.primary + '20' }
+              ]}>
+                <Icon
+                  size={20}
+                  color={isActive ? colors.primary : colors.textMuted}
+                  strokeWidth={isActive ? 2.4 : 1.8}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.navLabel,
+                  { color: colors.textMuted },
+                  isActive && { color: colors.primary, fontWeight: '700' },
+                ]}
+              >
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* Detail Modal */}
@@ -243,14 +186,22 @@ const styles = StyleSheet.create({
   navTab: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 2,
+    minWidth: 60,
+  },
+  iconContainer: {
+    paddingHorizontal: 14,
     paddingVertical: 4,
-    minWidth: 56,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
   },
   navLabel: {
     color: '#64748b',
-    fontSize: 11,
-    marginTop: 3,
+    fontSize: 10.5,
     fontWeight: '500',
+    letterSpacing: 0.1,
   },
   navLabelActive: {
     color: '#38bdf8',

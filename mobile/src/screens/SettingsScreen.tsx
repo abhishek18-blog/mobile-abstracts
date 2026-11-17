@@ -256,7 +256,7 @@ export const SettingsScreen: React.FC = () => {
   const isInterestsValid = selectedInterests.length >= 1 && selectedInterests.length <= 4;
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.text }]}>Account & Settings</Text>
       </View>

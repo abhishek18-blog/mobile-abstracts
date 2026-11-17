@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X, Bookmark, ExternalLink, Award, Calendar, Tag, FolderPlus } from 'lucide-react-native';
 import { Paper, Project } from '../types';
-import { papersApi, projectsApi } from '../services/api';
+import { papersApi, projectsApi, paperCache, getAbstractText } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
 
 interface PaperDetailModalProps {
@@ -21,17 +21,28 @@ interface PaperDetailModalProps {
 }
 
 export const PaperDetailModalScreen: React.FC<PaperDetailModalProps> = ({ paperId, onClose }) => {
-  const { colors } = useTheme();
+  const { colors, theme } = useTheme();
   const [paper, setPaper] = useState<Paper | null>(null);
   const [loading, setLoading] = useState(true);
   const [readingProgress, setReadingProgress] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
+  const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
 
   useEffect(() => {
     if (!paperId) return;
 
+    // Check cache immediately for instant modal pop up!
+    if (paperCache.has(paperId)) {
+      const cached = paperCache.get(paperId)!;
+      setPaper(cached);
+      setReadingProgress(cached.readingProgress || 0);
+      setLoading(false);
+    }
+
     const fetchPaperDetailAndProjects = async () => {
-      setLoading(true);
+      if (!paperCache.has(paperId)) {
+        setLoading(true);
+      }
       try {
         const [paperRes, projectsRes] = await Promise.all([
           papersApi.getById(paperId),
@@ -158,7 +169,7 @@ export const PaperDetailModalScreen: React.FC<PaperDetailModalProps> = ({ paperI
                       style={[
                         styles.progressChipText,
                         { color: colors.textMuted },
-                        readingProgress === pct && { color: '#000000' },
+                        readingProgress === pct && { color: primaryBtnTextColor, fontWeight: '700' },
                       ]}
                     >
                       {pct}%
@@ -191,17 +202,28 @@ export const PaperDetailModalScreen: React.FC<PaperDetailModalProps> = ({ paperI
               )}
             </View>
 
-            {/* Abstract Section */}
-            <View style={styles.section}>
-              <Text style={[styles.sectionHeader, { color: colors.text }]}>Abstract Summary</Text>
-              <Text style={[styles.abstractText, { color: colors.textMuted }]}>{paper.abstract}</Text>
+            {/* Full Unabridged Abstract Section */}
+            <View style={[styles.abstractSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.abstractHeaderRow}>
+                <Text style={[styles.sectionHeader, { color: colors.text }]}>Original Publication Abstract</Text>
+              </View>
+              <Text 
+                selectable 
+                style={[styles.abstractText, { color: colors.text }]}
+              >
+                {getAbstractText(paper)}
+              </Text>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.actionRow}>
-              <TouchableOpacity style={[styles.pdfButton, { backgroundColor: colors.primary }]} onPress={handleOpenPdf}>
-                <ExternalLink size={18} color="#000000" />
-                <Text style={styles.pdfButtonText}>Read PDF / View Source</Text>
+              <TouchableOpacity 
+                style={[styles.pdfButton, { backgroundColor: colors.primary }]} 
+                onPress={handleOpenPdf}
+                activeOpacity={0.85}
+              >
+                <ExternalLink size={18} color={primaryBtnTextColor} />
+                <Text style={[styles.pdfButtonText, { color: primaryBtnTextColor }]}>Read PDF / View Source</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -326,14 +348,26 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 24,
   },
+  abstractSection: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+    marginBottom: 24,
+  },
+  abstractHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
   sectionHeader: {
     fontSize: 16,
     fontWeight: '700',
   },
   abstractText: {
-    fontSize: 15,
-    lineHeight: 24,
-    marginTop: 8,
+    fontSize: 14.5,
+    lineHeight: 23,
+    letterSpacing: 0.1,
   },
   actionRow: {
     marginTop: 12,

@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "scheme": "appdev",
+    "edgeToEdge": "manual",
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./mobile/logo/icon.png",
+        "backgroundColor": "#090B10"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}

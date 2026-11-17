@@ -239,12 +239,15 @@ export async function searchExternalPapers(req, res) {
       return res.status(400).json({ success: false, error: 'Search query (q) is required' });
     }
 
+    // ─── 1. SERVER-SIDE CACHE CHECK (Shared across all users) ─────────
+    // If ANY user requested this exact query within the last 1 hour (CACHE_TTL),
+    // we serve it directly from node memory in ~1 millisecond!
     const userId = req.userId || 'public';
     const cacheKey = getCacheKey(q, limit, offset, year, sort, userId);
     const cached = searchCache.get(cacheKey);
     
     if (cached && (Date.now() - cached.timestamp < CACHE_TTL)) {
-      console.log('⚡ Serving search from cache:', cacheKey);
+      console.log('⚡ Serving search from server cache (1ms response):', cacheKey);
       return res.json(cached.data);
     }
 

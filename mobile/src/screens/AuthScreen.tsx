@@ -16,6 +16,19 @@ import {
   Linking,
 } from 'react-native';
 import { LogIn, UserPlus, ArrowLeft, X, Check, Mail, ShieldCheck, UserCheck } from 'lucide-react-native';
+
+// Safely load native Google Sign-In if available in native binary (e.g. custom dev build),
+// while gracefully falling back in Expo Go where native binary does not register RNGoogleSignin.
+let GoogleSignin: any = null;
+let statusCodes: any = {};
+try {
+  const googleAuthModule = require('@react-native-google-signin/google-signin');
+  GoogleSignin = googleAuthModule?.GoogleSignin || null;
+  statusCodes = googleAuthModule?.statusCodes || {};
+} catch (err) {
+  console.log('[AuthScreen] Native GoogleSignin module unavailable in this environment');
+}
+
 import { useAuth } from '../context/AuthContext';
 import { DEFAULT_API_URL, setCustomApiUrl } from '../services/api';
 import { useTheme } from '../context/ThemeContext';
@@ -41,7 +54,8 @@ const fetchAuthWithFallback = async (endpoint: string, options: RequestInit): Pr
 
   for (const baseUrl of candidateUrls) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    // 15-second timeout to allow sleeping cloud servers (Render free-tier) to wake up
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     try {
       const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -58,6 +72,10 @@ const fetchAuthWithFallback = async (endpoint: string, options: RequestInit): Pr
       lastError = err;
       console.warn(`[Auth Fallback] Attempt to ${baseUrl}${endpoint} failed:`, err.message || err);
     }
+  }
+
+  if (lastError && (lastError.name === 'AbortError' || lastError.message === 'Aborted')) {
+    throw new Error('Connection timed out. The server may be waking up, please try again in a few moments.');
   }
 
   throw lastError || new Error('Unable to connect to any API backend server.');
@@ -80,6 +98,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   const [showGoogleModal, setShowGoogleModal] = useState(false);
   const [googleEmailInput, setGoogleEmailInput] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  // Initialize Native Google Sign-In if available
+  useEffect(() => {
+    if (GoogleSignin?.configure) {
+      try {
+        GoogleSignin.configure({
+          scopes: ['email', 'profile'],
+        });
+      } catch (e) {
+        console.warn('GoogleSignin configure error:', e);
+      }
+    }
+  }, []);
 
   // Listen for deep links
   useEffect(() => {
@@ -111,6 +142,54 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
       }
     } catch (e) {
       console.warn('Deep link handling error:', e);
+    }
+  };
+
+  // Trigger Native Google Account Chooser (or fallback modal in Expo Go)
+  const handleNativeGoogleSignIn = async () => {
+    if (!GoogleSignin?.signIn) {
+      // In Expo Go or if native module is absent, open the Google dialog directly
+      setShowGoogleModal(true);
+      return;
+    }
+
+    try {
+      setGoogleLoading(true);
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+      const response = await GoogleSignin.signIn();
+
+      // Extract user profile from native Google response
+      const user = (response as any)?.data?.user || (response as any)?.user;
+      const targetEmail = user?.email;
+      const targetName = user?.name || (targetEmail ? targetEmail.split('@')[0] : 'Google User');
+      const targetAvatar = user?.photo;
+
+      if (!targetEmail) {
+        throw new Error('No email found in selected Google account.');
+      }
+
+      await executeGoogleLogin(targetEmail, targetName, targetAvatar);
+    } catch (err: any) {
+      console.warn('Native Google Sign-In error:', err);
+      if (statusCodes && err.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User dismissed the account picker
+      } else if (statusCodes && err.code === statusCodes.IN_PROGRESS) {
+        // Already in progress
+      } else if (statusCodes && err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        Alert.alert(
+          'Google Play Services Required',
+          'Google Play Services is not available or outdated on this device. Would you like to enter your Google email directly?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Enter Email', onPress: () => setShowGoogleModal(true) }
+          ]
+        );
+      } else {
+        // Fallback to manual entry if native services error
+        setShowGoogleModal(true);
+      }
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -179,14 +258,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   };
 
   // Google Sign-In: Verifies MongoDB record for email and signs user in directly
-  const executeGoogleLogin = async (targetEmail: string) => {
+  const executeGoogleLogin = async (targetEmail: string, customName?: string, customAvatar?: string) => {
     if (!targetEmail || !targetEmail.includes('@')) {
       Alert.alert('Invalid Email', 'Please enter a valid Google email address.');
       return;
     }
 
     setGoogleLoading(true);
-    const displayName = targetEmail.split('@')[0].replace('.', ' ');
+    const displayName = customName || targetEmail.split('@')[0].replace('.', ' ');
     const formattedName = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
     try {
@@ -197,7 +276,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
         body: JSON.stringify({
           email: targetEmail.trim(),
           name: formattedName,
-          avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=2563eb&color=fff`,
+          avatar_url: customAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(formattedName)}&background=2563eb&color=fff`,
         }),
       });
 
@@ -337,14 +416,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
             {/* Continue with Google */}
             <TouchableOpacity
               style={styles.googleBtn}
-              onPress={() => setShowGoogleModal(true)}
+              onPress={handleNativeGoogleSignIn}
+              disabled={googleLoading || loading}
               activeOpacity={0.85}
             >
-              <Image
-                source={{ uri: 'https://www.google.com/favicon.ico' }}
-                style={styles.googleIcon}
-              />
-              <Text style={styles.googleBtnText}>Continue with Google</Text>
+              {googleLoading ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <>
+                  <Image
+                    source={{ uri: 'https://www.google.com/favicon.ico' }}
+                    style={styles.googleIcon}
+                  />
+                  <Text style={styles.googleBtnText}>Continue with Google</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.switchBtn} onPress={() => setIsRegister(!isRegister)}>
@@ -373,7 +459,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
       >
         <View style={styles.modalOverlay}>
           <TouchableOpacity
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
             onPress={() => setShowGoogleModal(false)}
             activeOpacity={1}
           />
