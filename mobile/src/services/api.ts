@@ -610,7 +610,7 @@ export const searchApi = {
     // 3. Tier 2 Fallback: Direct OpenAlex Public API
     try {
       const pageNum = Math.floor(offset / limit) + 1;
-      const alexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&page=${pageNum}&select=id,title,authorships,publication_year,cited_by_count,open_access,doi,primary_location,abstract_inverted_index,concepts`;
+      const alexUrl = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${limit}&page=${pageNum}&select=id,title,authorships,publication_year,cited_by_count,open_access,doi,primary_location,abstract_inverted_index`;
       const alexRes = await fetch(alexUrl, {
         headers: {
           'Accept': 'application/json',
@@ -631,20 +631,14 @@ export const searchApi = {
               }
               fullAbstract = words.join(' ').replace(/\s+/g, ' ').trim();
             }
-            const realTags = (item.concepts || [])
-              .slice(0, 3)
-              .map((c: any) => c.display_name)
-              .filter((name: string) => name && !/openalex|semantic scholar|abstracts hub/i.test(name));
-
             return {
               externalId: item.id || Math.random().toString(),
               title: item.display_name || item.title || 'Untitled Research Paper',
-              authors: item.authorships ? item.authorships.map((a: any) => a.author?.display_name).filter(Boolean) : ['Independent Researcher'],
+              authors: item.authorships ? item.authorships.map((a: any) => a.author?.display_name).filter(Boolean) : ['OpenAlex Researcher'],
               year: item.publication_year ? String(item.publication_year) : '2024',
               citations: item.cited_by_count || 0,
               abstract: fullAbstract || '',
               source: 'OpenAlex',
-              tags: realTags,
               url: item.doi || item.primary_location?.landing_page_url || null,
               pdfUrl: item.primary_location?.pdf_url || item.open_access?.oa_url || null,
               doi: item.doi || null,
@@ -777,7 +771,7 @@ export const recommendationApi = {
             authors: p.authors || [],
             year: p.year || '2024',
             citations: p.citations || 0,
-            tags: [p.source || 'Semantic Scholar (Official)'],
+            tags: [topic],
             abstract: p.abstract || 'No abstract available.',
             pdf_url: p.pdfUrl,
             source_url: p.url,
@@ -819,7 +813,7 @@ export const recommendationApi = {
               authors: (paper.authors || []).map((a: any) => a.name),
               year: paper.year ? String(paper.year) : '2024',
               citations: paper.citationCount || 0,
-              tags: [configuredSemanticScholarApiKey ? 'Semantic Scholar (Official API)' : 'Semantic Scholar (Public)'],
+              tags: [topic],
               abstract: paper.abstract || 'Abstract not available.',
               pdf_url: paper.openAccessPdf?.url || null,
               source_url: paper.url || null,
@@ -864,13 +858,18 @@ export const recommendationApi = {
                 abstract = words.join(' ').replace(/\s+/g, ' ').trim();
               }
 
+              const conceptTags = (work.concepts || [])
+                .map((c: any) => c.display_name)
+                .filter(Boolean)
+                .slice(0, 3);
+
               return {
                 id: work.id?.replace('https://openalex.org/', '') || Math.random().toString(),
                 title: work.title || 'Untitled',
                 authors: (work.authorships || []).slice(0, 6).map((a: any) => a.author?.display_name || 'Unknown'),
                 year: work.publication_year ? String(work.publication_year) : '2024',
                 citations: work.cited_by_count || 0,
-                tags: [topic],
+                tags: conceptTags.length > 0 ? conceptTags : [topic],
                 abstract,
                 pdf_url: work.open_access?.oa_url || work.primary_location?.pdf_url || null,
                 source_url: work.primary_location?.landing_page_url || work.doi || null,

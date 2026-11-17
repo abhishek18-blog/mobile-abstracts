@@ -354,6 +354,13 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
           </View>
         ))}
       </ScrollView>
+
+      {/* Source indicator */}
+      {apiSource ? (
+        <Text style={[styles.sourceTag, { color: colors.textMuted }]}>
+          📡 Source: {apiSource}
+        </Text>
+      ) : null}
     </View>
   );
 
