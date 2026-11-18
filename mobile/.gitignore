@@ -2,12 +2,48 @@ node_modules/
 .expo/
 dist/
 npm-debug.*
+web-build/
+android/
+ios/
+
+# Environment variables
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+
+# Google & Firebase service credentials and config
+google-services.json
+GoogleService-Info.plist
+*google-services*.json
+*GoogleService-Info*.plist
+!google-services.json.example
+!GoogleService-Info.plist.example
+*firebase-adminsdk*.json
+serviceAccountKey.json
+service-account*.json
+credentials.json
+client_secret*.json
+
+# Mobile certificates, keys and keystores
+*.keystore
 *.jks
 *.p8
 *.p12
 *.key
+*.pem
+*.crt
+*.cer
+*.der
+*.pfx
 *.mobileprovision
+AuthKey_*.p8
 *.orig.*
-web-build/
-android/
-ios/
+
+# Secrets and tokens
+secrets/
+*.secret
+*.secrets
+token.json
