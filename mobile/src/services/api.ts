@@ -241,54 +241,15 @@ export const persistLocalProjects = async (projects: Project[]) => {
   } catch {}
 };
 
-let localCommunities: Community[] = [
-  {
-    id: 'comm-1',
-    name: 'Machine Learning & AI',
-    description: 'Discussions on state-of-the-art ML models, architectures, and ethical AI deployment.',
-    subject: 'Computer Science',
-    icon: '🤖',
-    memberCount: 4200,
-    isMember: true,
-    posts: [
-      {
-        id: 'post-1',
-        content: 'Has anyone benchmarks on reasoning models vs standard LLM fine-tuning on academic datasets?',
-        author: { name: 'Dr. Sarah Chen', role: 'AI Researcher', avatar_initials: 'SC' },
-        likes: 24,
-        created_at: new Date().toISOString(),
-        papers: [],
-      },
-    ],
-  },
-  {
-    id: 'comm-2',
-    name: 'Quantum Computing',
-    description: 'Quantum hardware algorithms, error mitigation, and quantum chemistry simulations.',
-    subject: 'Physics',
-    icon: '⚛️',
-    memberCount: 1850,
-    isMember: false,
-    posts: [
-      {
-        id: 'post-2',
-        content: 'New preprint out analyzing topological qubits error rates under room temperature conditions!',
-        author: { name: 'Prof. Marcus Vance', role: 'Physicist', avatar_initials: 'MV' },
-        likes: 18,
-        created_at: new Date().toISOString(),
-        papers: [],
-      },
-    ],
-  },
-];
+let localCommunities: Community[] = [];
 
-// Initialize local communities from storage
+// Initialize local communities from storage (filtering out any old mock IDs)
 AsyncStorage.getItem(OFFLINE_COMMUNITIES_KEY).then((raw) => {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        localCommunities = parsed;
+        localCommunities = parsed.filter(c => c && c.id && !c.id.startsWith('comm-'));
       }
     } catch {}
   }
@@ -296,8 +257,9 @@ AsyncStorage.getItem(OFFLINE_COMMUNITIES_KEY).then((raw) => {
 
 export const persistLocalCommunities = async (comms: Community[]) => {
   try {
-    localCommunities = comms;
-    await AsyncStorage.setItem(OFFLINE_COMMUNITIES_KEY, JSON.stringify(comms));
+    const valid = (comms || []).filter(c => c && c.id && !c.id.startsWith('comm-'));
+    localCommunities = valid;
+    await AsyncStorage.setItem(OFFLINE_COMMUNITIES_KEY, JSON.stringify(valid));
   } catch {}
 };
 
@@ -1079,7 +1041,7 @@ export const communityApi = {
     try {
       const res = await request<Community>(`/community/${id}`);
       if (res.success && res.data) {
-        const idx = localCommunities.findIndex(c => c.id === id);
+        const idx = localCommunities.findIndex(c => c.id === id || c.id === res.data.id);
         if (idx !== -1) {
           localCommunities[idx] = { ...localCommunities[idx], ...res.data };
         } else {
@@ -1088,9 +1050,13 @@ export const communityApi = {
         persistLocalCommunities(localCommunities);
       }
       return res;
-    } catch {
-      const found = localCommunities.find(c => c.id === id) || localCommunities[0];
-      return { success: true, data: found };
+    } catch (err: any) {
+      // Look up offline cache ONLY for the requested ID; never mask 404 with localCommunities[0]
+      const found = localCommunities.find(c => c.id === id);
+      if (found) {
+        return { success: true, data: found };
+      }
+      return { success: false, error: err?.message || 'Community not found' };
     }
   },
 

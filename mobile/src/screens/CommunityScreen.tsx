@@ -78,12 +78,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     try {
       const res = await communityApi.getAll();
       if (res.success && res.data) {
-        setCommunities(res.data);
+        // Sanitize out any legacy mock comm- entries
+        const valid = res.data.filter(c => c && c.id && !c.id.startsWith('comm-'));
+        setCommunities(valid.length > 0 ? valid : res.data);
         
         // Retain or select active community
-        if (res.data.length > 0) {
-          const activeId = selectedCommunity?.id || res.data[0]?.id;
-          if (activeId) {
+        const listToUse = valid.length > 0 ? valid : res.data;
+        if (listToUse.length > 0) {
+          const currentValid = selectedCommunity && !selectedCommunity.id.startsWith('comm-');
+          const activeId = currentValid ? selectedCommunity.id : listToUse[0].id;
+          if (activeId && !activeId.startsWith('comm-')) {
             await selectCommunityWithDetails(activeId);
           }
         }
@@ -102,20 +106,31 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   // Poll for new messages every 3 seconds to keep chat real-time
   useEffect(() => {
-    if (!selectedCommunity) return;
+    if (!selectedCommunity || !selectedCommunity.id || selectedCommunity.id.startsWith('comm-')) return;
 
+    let consecutiveErrors = 0;
     const pollInterval = setInterval(async () => {
+      // Circuit breaker: stop polling if too many consecutive errors (e.g. 404)
+      if (consecutiveErrors >= 3) {
+        clearInterval(pollInterval);
+        return;
+      }
+
       try {
         const res = await communityApi.getById(selectedCommunity.id);
         if (res.success && res.data) {
+          consecutiveErrors = 0;
           const newPostsJson = JSON.stringify(res.data.posts || []);
           const currentPostsJson = JSON.stringify(selectedCommunity.posts || []);
           if (newPostsJson !== currentPostsJson) {
             const decryptedPosts = await decryptPosts(res.data.posts || [], selectedCommunity.id);
             setSelectedCommunity(prev => (prev ? { ...prev, ...res.data, posts: decryptedPosts } : null));
           }
+        } else {
+          consecutiveErrors++;
         }
       } catch (err) {
+        consecutiveErrors++;
         console.warn('Failed to poll community posts:', err);
       }
     }, 3000);
