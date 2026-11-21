@@ -176,6 +176,61 @@ Integrated Firebase Analytics to automatically track user behavior and engagemen
 - **Why**: Eliminates validation gaps between new account registration and account updates.
 - **How**: Applied centralized password validation rules in `server/routes/user.js` and `authController.js`.
 
+### 11. End-to-End Encryption (E2EE) with Zero-Knowledge Cloud Storage
+- **What**: Full client-side cryptographic encryption and decryption of community messages, where only group members possess the cryptographic keys.
+- **Why**: Ensures complete privacy. Neither MongoDB Atlas, the Node.js backend server, network intermediaries, nor cloud database administrators can read user communications.
+- **Cryptographic Algorithms**:
+  - **Symmetric Cipher**: **AES-256-GCM** (Galois/Counter Mode) with 12-byte (96-bit) cryptographically random Nonce/IV per message. Provides both confidentiality and AEAD integrity verification (any bit tampering causes decryption failure).
+  - **Asymmetric Key Agreement**: **X25519 (Curve25519 ECDH)** for pairwise key agreement.
+  - **Key Derivation**: **HKDF (HMAC-SHA256)** with domain separation salts to derive uniform 256-bit symmetric room keys.
+  - **Private Key Storage**: Client-side hardware/persistent sandbox (`AsyncStorage` / `SecureStore`), never exposed to the network.
+- **Wire & Database Format**:
+  - Encrypted payloads are formatted as:
+    ```
+    E2EE:v1:aes-gcm:<12-byte-nonce-hex>:<ciphertext-and-auth-tag-hex>
+    ```
+  - Example stored document in MongoDB Atlas:
+    ```json
+    {
+      "_id": "673dd49f829...",
+      "community_id": "66bc90e...",
+      "user_id": "66bc812...",
+      "content": "E2EE:v1:aes-gcm:5b5fb5032c0c811a3f1ba39e:095c08b4c950ad89f527793f1e53e922af6eed6388aa7655ee6b406e05bd8d7442e54a7f3a1e2ab51d6e15164fadd261d23dd3b2fe66d503dfae3df8519a19",
+      "likes": 0,
+      "created_at": "2026-11-21T09:18:00.000Z"
+    }
+    ```
+- **Lifecycle & Flow**:
+  1. **Send**: User types message -> `encryptionService.encryptCommunityMessage(text, communityId)` -> optimistic UI update -> ciphertext sent to backend.
+  2. **Storage**: Backend stores only the ciphertext into MongoDB Atlas `CommunityPost`.
+  3. **Receive**: Client polls/fetches posts -> `encryptionService.decryptCommunityMessage(ciphertext, communityId)` -> renders plaintext on screen.
+  4. **Backward Compatibility**: Legacy unencrypted posts are detected and rendered as-is.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Alice as 📱 Alice (Sender Phone)
+    participant Server as ☁️ Node.js API
+    participant Atlas as 🍃 MongoDB Atlas
+    actor Bob as 📱 Bob (Receiver Phone)
+
+    Note over Alice,Bob: 🔒 Local E2EE Service (AES-256-GCM + HKDF)
+    Alice->>Alice: Encrypts "Paper draft ready!"<br/>→ "E2EE:v1:aes-gcm:5b5f...:095c..."
+    Alice->>Server: POST /api/community/:id/posts (Ciphertext)
+    Server->>Atlas: Saves ciphertext (Zero Knowledge)
+    Note over Atlas: Database only holds unreadable ciphertext
+    Server->>Bob: Pushes / Polls post (Ciphertext)
+    Bob->>Bob: Decrypts with local Room Key<br/>→ "Paper draft ready!"
+```
+
+### 12. Secrets, API Keys & Git Hygiene
+- **What**: Strict isolation of environment variables, Google/Firebase service accounts, and mobile signing credentials from the version control system.
+- **Why**: Eliminates public leaks of private keys and API credentials to GitHub, preventing unauthorized access to cloud databases, AI APIs, and third-party services.
+- **How**:
+  - Hardened root `.gitignore` and `mobile/.gitignore` to ignore all `.env*`, `*.env`, `google-services.json`, `GoogleService-Info.plist`, `*firebase-adminsdk*.json`, `*.keystore`, and `*.p12` files.
+  - Provided sanitized `.env.example`, `server/.env.example`, `mobile/.env.example`, `mobile/google-services.json.example`, and `mobile/GoogleService-Info.plist.example` templates with placeholders for team onboarding.
+  - Active untracking of sensitive assets from Git index (`git rm --cached`) while keeping files intact on local development environments.
+
 ---
 
 ## 🧭 Navigation
@@ -330,3 +385,5 @@ The project is configured for **Vercel** (`vercel.json`), utilizing serverless f
 | `server/controllers/searchController.js` | Paper discovery API with user-scoped caching & ReDoS protection |
 | `server/controllers/userController.js` | User profile CRUD including interests & validation |
 | `server/controllers/papersController.js` | Paper CRUD + physical file cleanup |
+| `mobile/src/services/encryptionService.ts` | End-to-End Encryption service (AES-256-GCM + X25519 ECDH + HKDF) |
+| `mobile/src/screens/CommunityScreen.tsx` | Mobile Community groups & real-time E2EE messaging view |
