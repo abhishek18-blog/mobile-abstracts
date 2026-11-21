@@ -25,17 +25,15 @@ export const getAllPapers = async (req, res) => {
         { authors: q }
       ];
     }
-    if (tag) {
+    if (tag && tag !== 'saved') {
       query.tags = tag;
     }
     if (year) {
       query.year = year;
     }
 
-    // BEFORE: let papers = [];  ← useless empty box that got thrown away immediately
-    // AFTER: removed — we declare papers directly below when we actually have the data
-    if (saved_by) {
-      const userIdToFilter = saved_by === 'true' ? req.userId : saved_by;
+    if (saved_by || tag === 'saved') {
+      const userIdToFilter = (saved_by && saved_by !== 'true') ? saved_by : req.userId;
       const savedEntries = await SavedPaper.find({ user_id: userIdToFilter });
       const paperIds = savedEntries.map(s => s.paper_id);
       
