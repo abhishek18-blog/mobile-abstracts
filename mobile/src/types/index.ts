@@ -68,6 +68,16 @@ export interface UserProfile {
   updated_at?: string;
 }
 
+export interface CommunityMemberInfo {
+  id: string;
+  name: string;
+  avatar_initials?: string;
+  avatar_url?: string;
+  role?: string;
+  community_role?: 'admin' | 'member';
+  joined_at?: string;
+}
+
 export interface Community {
   id: string;
   name: string;
@@ -77,6 +87,9 @@ export interface Community {
   memberCount: number;
   postCount?: number;
   isMember: boolean;
+  isAdmin?: boolean;
+  created_by?: string;
+  members?: CommunityMemberInfo[];
   posts?: CommunityPost[];
 }
 

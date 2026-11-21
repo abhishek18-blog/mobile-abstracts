@@ -37,12 +37,15 @@ export const getAllCommunities = async (req, res) => {
         CommunityMember.findOne({ community_id: community._id, user_id: req.userId }).lean()
       ]);
 
+      const isUserAdmin = isMember ? isMember.role === 'admin' : String(community.created_by) === String(req.userId);
+
       return {
         ...community,
         id: community._id,
         memberCount: membersCount,
         postCount: postsCount,
-        isMember: !!isMember  // converts MongoDB object to true/false
+        isMember: !!isMember,  // converts MongoDB object to true/false
+        isAdmin: isUserAdmin,
       };
     }));
 
@@ -115,9 +118,19 @@ export const getCommunityById = async (req, res) => {
       });
     }
 
+    const isCurrentUserAdmin = isMemberDoc ? isMemberDoc.role === 'admin' : String(community.created_by) === String(req.userId);
+
     const memberDetails = membersRaw.map(m => {
       const u = m.user_id;
-      return u ? { id: u._id, name: u.name, avatar_initials: u.avatar_initials, avatar_url: u.avatar_url, role: u.role, joined_at: m.joined_at } : null;
+      return u ? {
+        id: u._id,
+        name: u.name,
+        avatar_initials: u.avatar_initials,
+        avatar_url: u.avatar_url,
+        role: u.role,
+        community_role: m.role || (String(community.created_by) === String(u._id) ? 'admin' : 'member'),
+        joined_at: m.joined_at
+      } : null;
     }).filter(Boolean);
 
     const enrichedPosts = postsRaw.map(post => {
@@ -138,6 +151,7 @@ export const getCommunityById = async (req, res) => {
         memberCount: membersCount,
         postCount: enrichedPosts.length,
         isMember,
+        isAdmin: isCurrentUserAdmin,
         members: memberDetails,
         posts: enrichedPosts,
       },
@@ -490,9 +504,12 @@ export const deleteCommunity = async (req, res) => {
 
     // [SECURITY]: Critical Action Authorization
     // Deleting a community cascades and deletes all posts, members, and requests.
-    // This is highly destructive, so we enforce a strict rule: ONLY the original creator can delete it.
-    if (String(community.created_by) !== String(req.userId)) {
-      return res.status(403).json({ success: false, error: 'Only the original creator can delete this community' });
+    // Authorized only for community admins (creator or promoted admin).
+    const userMember = await CommunityMember.findOne({ community_id: community._id, user_id: req.userId });
+    const isCreator = String(community.created_by) === String(req.userId);
+    const isAdmin = (userMember && userMember.role === 'admin') || (!userMember && isCreator);
+    if (!isAdmin) {
+      return res.status(403).json({ success: false, error: 'Only a community admin can delete this community' });
     }
 
     await Community.deleteOne({ _id: community._id });
@@ -606,16 +623,37 @@ export const updateMemberRole = async (req, res) => {
     const community = await Community.findById(req.params.id);
     if (!community) return res.status(404).json({ success: false, error: 'Community not found' });
     
-    const isAdmin = String(community.created_by) === String(req.userId) || !!(await CommunityMember.findOne({ community_id: req.params.id, user_id: req.userId, role: 'admin' }));
+    const userMember = await CommunityMember.findOne({ community_id: req.params.id, user_id: req.userId });
+    const isCreator = String(community.created_by) === String(req.userId);
+    const isAdmin = (userMember && userMember.role === 'admin') || (!userMember && isCreator);
     if (!isAdmin) return res.status(403).json({ success: false, error: 'Only admins can update roles' });
     
-    const memberToUpdate = await CommunityMember.findOne({ community_id: req.params.id, user_id: req.params.userId });
-    if (!memberToUpdate) return res.status(404).json({ success: false, error: 'Member not found' });
-    
-    memberToUpdate.role = role;
+    let memberToUpdate = await CommunityMember.findOne({ community_id: req.params.id, user_id: req.params.userId });
+    if (!memberToUpdate) {
+      if (String(req.params.userId) === String(community.created_by)) {
+        memberToUpdate = new CommunityMember({
+          community_id: req.params.id,
+          user_id: req.params.userId,
+          role: role
+        });
+      } else {
+        return res.status(404).json({ success: false, error: 'Member not found' });
+      }
+    } else {
+      memberToUpdate.role = role;
+    }
     await memberToUpdate.save();
+
+    // If demoting creator, reassign primary created_by to another active admin if available
+    if (role === 'member' && String(community.created_by) === String(req.params.userId)) {
+      const otherAdmin = await CommunityMember.findOne({ community_id: req.params.id, role: 'admin', user_id: { $ne: req.params.userId } });
+      if (otherAdmin) {
+        community.created_by = otherAdmin.user_id;
+        await community.save();
+      }
+    }
     
-    res.json({ success: true, message: 'Member role updated' });
+    res.json({ success: true, message: `Member role updated to ${role}` });
   } catch (error) {
     console.error('Error updating member role:', error);
     res.status(500).json({ success: false, error: 'Failed to update member role' });

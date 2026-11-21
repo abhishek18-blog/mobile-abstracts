@@ -366,21 +366,18 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
 
   return (
     <SafeAreaView edges={['top']} style={[styles.container, { backgroundColor: colors.background }]}>
+      {ListHeader}
       {loading ? (
-        <>
-          {ListHeader}
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[styles.loadingText, { color: colors.textMuted }]}>
-              Fetching papers from research APIs...
-            </Text>
-          </View>
-        </>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textMuted }]}>
+            Fetching papers from research APIs...
+          </Text>
+        </View>
       ) : (
         <FlatList<Paper>
           data={papers}
           keyExtractor={(item: Paper) => item.id}
-          ListHeaderComponent={ListHeader}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}

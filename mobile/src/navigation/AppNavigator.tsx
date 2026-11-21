@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { SplashScreen } from '../screens/SplashScreen';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
+import { notificationService } from '../services/notificationService';
 
 type TabName = 'discover' | 'library' | 'foryou' | 'community' | 'settings';
 
@@ -29,6 +30,11 @@ export const AppNavigator: React.FC = () => {
   const [showAuth, setShowAuth] = useState(false);
   const insets = useSafeAreaInsets();
   const { theme, colors } = useTheme();
+
+  // Initialize notifications on app launch
+  useEffect(() => {
+    notificationService.initialize();
+  }, []);
 
   // Initial Splash Screen with Abstracts SVG Logo and Creative Animated Spinner
   if (showSplash || isLoading || interestsLoading) {

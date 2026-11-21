@@ -1176,6 +1176,51 @@ export const communityApi = {
       return { success: true, data: null };
     }
   },
+
+  deleteCommunity: async (communityId: string): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/community/${communityId}`, {
+        method: 'DELETE',
+      });
+      const idx = localCommunities.findIndex(c => c.id === communityId);
+      if (idx !== -1) {
+        localCommunities.splice(idx, 1);
+        persistLocalCommunities(localCommunities);
+      }
+      return res;
+    } catch {
+      const idx = localCommunities.findIndex(c => c.id === communityId);
+      if (idx !== -1) {
+        localCommunities.splice(idx, 1);
+        persistLocalCommunities(localCommunities);
+      }
+      return { success: true, data: null };
+    }
+  },
+
+  updateMemberRole: async (communityId: string, userId: string, role: 'admin' | 'member'): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/community/${communityId}/members/${userId}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ role }),
+      });
+      const comm = localCommunities.find(c => c.id === communityId);
+      if (comm && comm.members) {
+        const m = comm.members.find(x => x.id === userId);
+        if (m) m.community_role = role;
+        persistLocalCommunities(localCommunities);
+      }
+      return res;
+    } catch {
+      const comm = localCommunities.find(c => c.id === communityId);
+      if (comm && comm.members) {
+        const m = comm.members.find(x => x.id === userId);
+        if (m) m.community_role = role;
+        persistLocalCommunities(localCommunities);
+      }
+      return { success: true, data: null };
+    }
+  },
 };
 
 // ─── User Profile API ───────────────────────────────────────────────────────
