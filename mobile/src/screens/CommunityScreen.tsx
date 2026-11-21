@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Users, Plus, X, Paperclip, Send, BookOpen, Tag, Lock } from 'lucide-react-native';
+import { Users, Plus, X, Paperclip, Send, BookOpen, Tag, Lock, ArrowLeft, Search, Check } from 'lucide-react-native';
 import { Community, CommunityPost, Paper } from '../types';
 import { communityApi, papersApi, cachePapers } from '../services/api';
 import { encryptionService } from '../services/encryptionService';
@@ -26,6 +26,13 @@ interface CommunityScreenProps {
   onSelectPaper?: (paperId: string) => void;
 }
 
+const AVATAR_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#06b6d4'];
+const getAvatarColor = (id: string) => {
+  let hash = 0;
+  for (let i = 0; i < (id || '').length; i++) hash = (hash << 5) - hash + id.charCodeAt(i);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+};
+
 export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper }) => {
   const { colors, theme } = useTheme();
   const { user, isGuest, logout } = useAuth();
@@ -35,6 +42,23 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   const [selectedCommunity, setSelectedCommunity] = useState<Community | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const [filterTab, setFilterTab] = useState<'all' | 'joined'>('all');
+
+  const filteredCommunities = useMemo(() => {
+    return communities.filter((c) => {
+      if (filterTab === 'joined' && !c.isMember) return false;
+      if (searchQuery.trim().length > 0) {
+        const q = searchQuery.toLowerCase();
+        const matchesName = c.name?.toLowerCase().includes(q);
+        const matchesDesc = c.description?.toLowerCase().includes(q);
+        const matchesSubject = c.subject?.toLowerCase().includes(q);
+        return matchesName || matchesDesc || matchesSubject;
+      }
+      return true;
+    });
+  }, [communities, filterTab, searchQuery]);
 
   // Group creation state
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -75,10 +99,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   const selectCommunityWithDetails = async (communityId: string) => {
     if (isGuest) {
-      const found = communities.find(c => c.id === communityId);
-      if (found) {
-        setSelectedCommunity({ ...found, posts: [] });
-      }
+      promptGuestSignIn();
       return;
     }
 
@@ -93,6 +114,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     }
   };
 
+  const handleCommunityPress = (community: Community) => {
+    if (isGuest) {
+      promptGuestSignIn(community.name);
+      return;
+    }
+    selectCommunityWithDetails(community.id);
+  };
+
   const fetchCommunities = async () => {
     try {
       const res = await communityApi.getAll();
@@ -101,18 +130,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
         const valid = res.data.filter(c => c && c.id && !c.id.startsWith('comm-'));
         const listToUse = valid.length > 0 ? valid : res.data;
         setCommunities(listToUse);
-        
-        // Retain or select active community
-        if (listToUse.length > 0) {
-          const currentValid = selectedCommunity && !selectedCommunity.id.startsWith('comm-');
-          const activeId = currentValid ? selectedCommunity.id : listToUse[0].id;
-          if (activeId && !activeId.startsWith('comm-')) {
-            if (isGuest) {
-              const target = listToUse.find(c => c.id === activeId) || listToUse[0];
-              setSelectedCommunity({ ...target, posts: [] });
-            } else {
-              await selectCommunityWithDetails(activeId);
-            }
+
+        // If a community was ALREADY open and user is not a guest, refresh its details
+        if (selectedCommunity && !isGuest) {
+          const stillExists = listToUse.find(c => c.id === selectedCommunity.id);
+          if (stillExists) {
+            await selectCommunityWithDetails(selectedCommunity.id);
           }
         }
       }
@@ -128,7 +151,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     fetchCommunities();
   }, []);
 
-  // Poll for new messages every 3 seconds to keep chat real-time (bypassed for guests)
+  // Poll for new messages every 3 seconds to keep chat real-time (only when inside a chat & not guest)
   useEffect(() => {
     if (isGuest || !selectedCommunity || !selectedCommunity.id || selectedCommunity.id.startsWith('comm-')) return;
 
@@ -398,146 +421,57 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
-      <View style={styles.header}>
-        <View style={styles.headerTitleRow}>
-          <Text style={[styles.title, { color: colors.text }]}>Communities</Text>
-          <TouchableOpacity 
-            style={[styles.createBtn, { backgroundColor: colors.primary }]}
-            onPress={() => {
-              if (isGuest) {
-                promptGuestSignIn();
-              } else {
-                setIsGroupModalOpen(true);
-              }
-            }}
-          >
-            <Plus size={16} color={primaryBtnTextColor} />
-            <Text style={[styles.createBtnText, { color: primaryBtnTextColor }]}>New Group</Text>
-          </TouchableOpacity>
-        </View>
-
-        <FlatList<Community>
-          horizontal
-          data={communities}
-          keyExtractor={(item: Community) => item.id}
-          showsHorizontalScrollIndicator={false}
-          renderItem={({ item }: { item: Community }) => (
-            <TouchableOpacity
-              style={[
-                styles.commChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-                selectedCommunity?.id === item.id && { backgroundColor: colors.primary, borderColor: colors.primary },
-              ]}
-              onPress={() => {
-                if (isGuest) {
-                  setSelectedCommunity({ ...item, posts: [] });
-                  promptGuestSignIn(item.name);
-                } else {
-                  selectCommunityWithDetails(item.id);
-                }
-              }}
-            >
-              <Text
-                style={[
-                  styles.commChipText,
-                  { color: colors.textMuted },
-                  selectedCommunity?.id === item.id && { color: primaryBtnTextColor, fontWeight: '700' },
-                ]}
-              >
-                {item.icon || '💬'} {item.name}
-              </Text>
-            </TouchableOpacity>
-          )}
-          contentContainerStyle={styles.chipList}
-        />
-      </View>
-
-      {loading && !refreshing ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : isGuest ? (
-        <View style={styles.guestLockedContainer}>
-          {selectedCommunity && (
-            <View style={[styles.banner, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-              <View style={styles.bannerInfo}>
-                <Text style={[styles.bannerTitle, { color: colors.text }]}>{selectedCommunity.name}</Text>
-                <Text style={[styles.bannerDesc, { color: colors.textMuted }]}>{selectedCommunity.description}</Text>
-                <View style={styles.bannerMetaRow}>
-                  <Text style={[styles.bannerMeta, { color: colors.primary }]}>
-                    {selectedCommunity.memberCount || 1} members · {selectedCommunity.subject}
-                  </Text>
-                  <View style={[styles.e2eeBadge, { backgroundColor: colors.primary + '18' }]}>
-                    <Lock size={10} color={colors.primary} />
-                    <Text style={[styles.e2eeBadgeText, { color: colors.primary }]}>Members Only</Text>
-                  </View>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.joinBtn, { backgroundColor: colors.primary }]}
-                onPress={() => promptGuestSignIn(selectedCommunity.name)}
-              >
-                <Text style={[styles.joinBtnText, { color: primaryBtnTextColor }]}>
-                  Join
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          <View style={styles.guestLockCenter}>
-            <View style={[styles.guestLockIconCircle, { backgroundColor: colors.primary + '18' }]}>
-              <Lock size={40} color={colors.primary} />
-            </View>
-            <Text style={[styles.guestLockTitle, { color: colors.text }]}>
-              Discussions Are Members Only
-            </Text>
-            <Text style={[styles.guestLockDesc, { color: colors.textMuted }]}>
-              Guest mode is strictly search and read-only for research papers. Sign in as a registered researcher to view messages, participate in discussions, and collaborate with authors.
-            </Text>
-            <TouchableOpacity
-              style={[styles.guestSignInBtn, { backgroundColor: colors.primary }]}
-              onPress={() => logout()}
-            >
-              <Text style={[styles.guestSignInBtnText, { color: primaryBtnTextColor }]}>
-                Sign In / Create Account
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : selectedCommunity ? (
+      {selectedCommunity ? (
+        // ─────────────────────────────────────────────────────────────────────────────
+        // 1. DEDICATED CHAT VIEW (Screen 2 in reference image)
+        // ─────────────────────────────────────────────────────────────────────────────
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
         >
-          {/* Active Group Chat Banner */}
-          <View style={[styles.banner, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-            <View style={styles.bannerInfo}>
-              <Text style={[styles.bannerTitle, { color: colors.text }]}>{selectedCommunity.name}</Text>
-              <Text style={[styles.bannerDesc, { color: colors.textMuted }]}>{selectedCommunity.description}</Text>
-              <View style={styles.bannerMetaRow}>
-                <Text style={[styles.bannerMeta, { color: colors.primary }]}>
-                  {selectedCommunity.memberCount || 1} members · {selectedCommunity.subject}
+          {/* Chat Header matching reference */}
+          <View style={[styles.chatHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              style={styles.chatHeaderBackBtn}
+              onPress={() => setSelectedCommunity(null)}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <ArrowLeft size={22} color={colors.text} />
+            </TouchableOpacity>
+
+            <View style={[styles.chatHeaderAvatar, { backgroundColor: getAvatarColor(selectedCommunity.id) + '25' }]}>
+              <Text style={styles.chatHeaderAvatarText}>{selectedCommunity.icon || '🔬'}</Text>
+            </View>
+
+            <View style={styles.chatHeaderDetails}>
+              <Text style={[styles.chatHeaderTitle, { color: colors.text }]} numberOfLines={1}>
+                {selectedCommunity.name}
+              </Text>
+              <View style={styles.chatHeaderStatusRow}>
+                <View style={styles.greenDot} />
+                <Text style={[styles.chatHeaderSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                  {selectedCommunity.memberCount || 1} members · E2EE
                 </Text>
-                <View style={[styles.e2eeBadge, { backgroundColor: colors.primary + '18' }]}>
-                  <Lock size={10} color={colors.primary} />
-                  <Text style={[styles.e2eeBadgeText, { color: colors.primary }]}>E2EE (AES-256)</Text>
-                </View>
               </View>
             </View>
 
             <TouchableOpacity
               style={[
-                styles.joinBtn,
+                styles.chatHeaderJoinBtn,
                 { backgroundColor: colors.primary },
-                selectedCommunity.isMember && { backgroundColor: colors.border },
+                selectedCommunity.isMember && { backgroundColor: colors.border + '80' },
               ]}
               onPress={() => handleJoin(selectedCommunity.id)}
             >
-              <Text style={[styles.joinBtnText, { color: selectedCommunity.isMember ? colors.text : primaryBtnTextColor }]}>
-                {selectedCommunity.isMember ? 'Joined' : 'Join'}
-              </Text>
+              {selectedCommunity.isMember ? (
+                <View style={styles.joinedPillContent}>
+                  <Check size={12} color={colors.text} />
+                  <Text style={[styles.chatHeaderJoinText, { color: colors.text, marginLeft: 3 }]}>Joined</Text>
+                </View>
+              ) : (
+                <Text style={[styles.chatHeaderJoinText, { color: primaryBtnTextColor }]}>Join</Text>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -546,7 +480,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             data={selectedCommunity.posts || []}
             keyExtractor={(item: CommunityPost) => item.id}
             renderItem={({ item }: { item: CommunityPost }) => {
-              // Determine if the current user sent this message
               const isOwnMessage = 
                 item.author?.avatar_initials === 'ME' ||
                 item.author?.name === 'You (Researcher)' ||
@@ -558,7 +491,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                   styles.messageRow,
                   isOwnMessage ? styles.messageRowRight : styles.messageRowLeft,
                 ]}>
-                  {/* Avatar on the left for received messages */}
                   {!isOwnMessage && (
                     <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
                       <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
@@ -571,12 +503,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                     activeOpacity={isOwnMessage ? 0.7 : 1}
                     onLongPress={() => isOwnMessage && handleDeletePost(item.id)}
                     style={[
-                    styles.messageBubble,
-                    isOwnMessage
-                      ? [styles.messageBubbleSent, { backgroundColor: colors.primary }]
-                      : [styles.messageBubbleReceived, { backgroundColor: colors.card, borderColor: colors.border }],
-                  ]}>
-                    {/* Sender name for received messages */}
+                      styles.messageBubble,
+                      isOwnMessage
+                        ? [styles.messageBubbleSent, { backgroundColor: colors.primary }]
+                        : [styles.messageBubbleReceived, { backgroundColor: colors.card, borderColor: colors.border }],
+                    ]}
+                  >
                     {!isOwnMessage && (
                       <View style={styles.bubbleHeader}>
                         <Text style={[styles.authorName, { color: colors.text }]}>
@@ -625,7 +557,6 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                     )}
                   </TouchableOpacity>
 
-                  {/* Avatar on the right for sent messages */}
                   {isOwnMessage && (
                     <View style={[styles.avatar, { backgroundColor: colors.primary, marginLeft: 8, marginRight: 0 }]}>
                       <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
@@ -642,17 +573,30 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                 refreshing={refreshing}
                 onRefresh={() => {
                   setRefreshing(true);
+                  if (selectedCommunity) {
+                    selectCommunityWithDetails(selectedCommunity.id);
+                  }
                   fetchCommunities();
                 }}
                 tintColor={colors.primary}
               />
+            }
+            ListEmptyComponent={
+              <View style={styles.emptyChatState}>
+                <View style={[styles.emptyChatCircle, { backgroundColor: colors.primary + '14' }]}>
+                  <BookOpen size={32} color={colors.primary} />
+                </View>
+                <Text style={[styles.emptyChatTitle, { color: colors.text }]}>No Messages Yet</Text>
+                <Text style={[styles.emptyChatDesc, { color: colors.textMuted }]}>
+                  Send the first message or attach a paper to start discussions in this community.
+                </Text>
+              </View>
             }
           />
 
           {/* Post Message Bar */}
           {selectedCommunity.isMember ? (
             <View style={[styles.inputContainer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-              {/* Attachment preview banner */}
               {attachedPaper && (
                 <View style={[styles.attachmentPreview, { backgroundColor: colors.background, borderColor: colors.border }]}>
                   <BookOpen size={14} color={colors.primary} />
@@ -675,7 +619,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
                 <TextInput
                   style={[styles.textInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
-                  placeholder="Share a thought or paper..."
+                  placeholder="Type a message..."
                   placeholderTextColor={colors.textMuted}
                   value={postContent}
                   onChangeText={setPostContent}
@@ -693,18 +637,200 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           ) : (
             <View style={[styles.lockedInput, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
               <Text style={[styles.lockedText, { color: colors.textMuted }]}>
-                Join this community group to attach papers and post messages.
+                Join this community to attach papers and post messages.
               </Text>
+              <TouchableOpacity
+                style={[styles.lockedJoinBtn, { backgroundColor: colors.primary }]}
+                onPress={() => handleJoin(selectedCommunity.id)}
+              >
+                <Text style={[styles.lockedJoinBtnText, { color: primaryBtnTextColor }]}>Join Community</Text>
+              </TouchableOpacity>
             </View>
           )}
         </KeyboardAvoidingView>
       ) : (
-        <View style={styles.emptyState}>
-          <Users size={48} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Groups Available</Text>
-          <Text style={[styles.emptySub, { color: colors.textMuted }]}>
-            Tap "New Group" at the top right to start a shared research space.
-          </Text>
+        // ─────────────────────────────────────────────────────────────────────────────
+        // 2. WHATSAPP-STYLE VERTICAL COMMUNITY LIST (Screen 1 in reference image)
+        // ─────────────────────────────────────────────────────────────────────────────
+        <View style={styles.verticalListWrapper}>
+          {/* Top Greeting Header */}
+          <View style={styles.listHeaderContainer}>
+            <View>
+              <Text style={[styles.listHeaderGreeting, { color: colors.textMuted }]}>
+                Hello, {user?.name ? user.name.split(' ')[0] : (isGuest ? 'Guest' : 'Researcher')}
+              </Text>
+              <Text style={[styles.listHeaderTitle, { color: colors.text }]}>
+                Communities
+              </Text>
+            </View>
+
+            <View style={styles.listHeaderActions}>
+              <TouchableOpacity
+                style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => setIsSearchVisible(!isSearchVisible)}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Search size={18} color={colors.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.headerCircleBtn, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  if (isGuest) promptGuestSignIn();
+                  else setIsGroupModalOpen(true);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Plus size={18} color={primaryBtnTextColor} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Search Bar (Collapsible / Toggleable) */}
+          {isSearchVisible && (
+            <View style={[styles.listSearchContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Search size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
+              <TextInput
+                style={[styles.listSearchInput, { color: colors.text }]}
+                placeholder="Search groups or subjects..."
+                placeholderTextColor={colors.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <X size={16} color={colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {/* Filter Pills ("All Groups", "Joined") matching reference */}
+          <View style={styles.filterPillContainer}>
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                filterTab === 'all'
+                  ? [styles.filterPillActive, { backgroundColor: colors.primary }]
+                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+              ]}
+              onPress={() => setFilterTab('all')}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  { color: filterTab === 'all' ? primaryBtnTextColor : colors.textMuted }
+                ]}
+              >
+                All Groups
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.filterPill,
+                filterTab === 'joined'
+                  ? [styles.filterPillActive, { backgroundColor: colors.primary }]
+                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+              ]}
+              onPress={() => {
+                if (isGuest) {
+                  promptGuestSignIn();
+                } else {
+                  setFilterTab('joined');
+                }
+              }}
+            >
+              <Text
+                style={[
+                  styles.filterPillText,
+                  { color: filterTab === 'joined' ? primaryBtnTextColor : colors.textMuted }
+                ]}
+              >
+                Joined
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Vertical Community List */}
+          {loading && !refreshing ? (
+            <View style={styles.center}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : (
+            <FlatList<Community>
+              data={filteredCommunities}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.verticalListContent}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={() => {
+                    setRefreshing(true);
+                    fetchCommunities();
+                  }}
+                  tintColor={colors.primary}
+                />
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.whatsappRow, { borderBottomColor: colors.border + '40' }]}
+                  onPress={() => handleCommunityPress(item)}
+                  activeOpacity={0.7}
+                >
+                  {/* Circular Avatar with soft tint */}
+                  <View style={[styles.whatsappAvatar, { backgroundColor: getAvatarColor(item.id) + '22' }]}>
+                    <Text style={styles.whatsappAvatarEmoji}>{item.icon || '🔬'}</Text>
+                  </View>
+
+                  {/* Group Info & Preview */}
+                  <View style={styles.whatsappDetails}>
+                    <View style={styles.whatsappHeaderRow}>
+                      <Text style={[styles.whatsappName, { color: colors.text }]} numberOfLines={1}>
+                        {item.name}
+                      </Text>
+                      <Text style={[styles.whatsappMeta, { color: colors.textMuted }]}>
+                        {item.memberCount || 1} members
+                      </Text>
+                    </View>
+
+                    <View style={styles.whatsappSubRow}>
+                      <Text style={[styles.whatsappSnippet, { color: colors.textMuted }]} numberOfLines={1}>
+                        {item.description || 'Tap to enter group chat'}
+                      </Text>
+                      {item.isMember && (
+                        <View style={[styles.joinedBadgePill, { backgroundColor: colors.primary + '18' }]}>
+                          <Text style={[styles.joinedBadgeTextPill, { color: colors.primary }]}>Joined</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Users size={48} color={colors.textMuted} />
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>No Communities Found</Text>
+                  <Text style={[styles.emptySub, { color: colors.textMuted }]}>
+                    {searchQuery ? 'Try a different keyword.' : 'Tap "+" to create a new research group.'}
+                  </Text>
+                </View>
+              }
+            />
+          )}
+
+          {/* Floating Action Button (FAB) matching reference */}
+          <TouchableOpacity
+            style={[styles.whatsappFab, { backgroundColor: colors.primary }]}
+            onPress={() => {
+              if (isGuest) promptGuestSignIn();
+              else setIsGroupModalOpen(true);
+            }}
+            activeOpacity={0.85}
+          >
+            <Plus size={26} color={primaryBtnTextColor} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -836,215 +962,322 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingHorizontal: 16,
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── 1. Vertical WhatsApp-Style List Styles (Reference Screen 1) ───────────
+  verticalListWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  listHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 8,
   },
-  headerTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  listHeaderGreeting: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 2,
+    letterSpacing: -0.2,
   },
-  title: {
-    fontSize: 24,
+  listHeaderTitle: {
+    fontSize: 26,
     fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  createBtn: {
+  listHeaderActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    gap: 10,
   },
-  createBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginLeft: 4,
+  headerCircleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  chipList: {
-    paddingVertical: 4,
-  },
-  commChip: {
+  listSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginTop: 4,
+    marginBottom: 10,
     paddingHorizontal: 14,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+  },
+  listSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  filterPillContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  filterPill: {
+    paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 20,
+  },
+  filterPillActive: {},
+  filterPillInactive: {
     borderWidth: 1,
-    marginRight: 8,
   },
-  commChipText: {
+  filterPillText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
-  banner: {
+  verticalListContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 90,
+  },
+  whatsappRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
     borderBottomWidth: 1,
   },
-  bannerInfo: {
-    flex: 0.7,
+  whatsappAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
   },
-  bannerTitle: {
-    fontSize: 15,
+  whatsappAvatarEmoji: {
+    fontSize: 24,
+  },
+  whatsappDetails: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  whatsappHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  whatsappName: {
+    fontSize: 16,
+    fontWeight: '700',
+    flex: 1,
+    marginRight: 8,
+  },
+  whatsappMeta: {
+    fontSize: 12,
+  },
+  whatsappSubRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  whatsappSnippet: {
+    fontSize: 13,
+    flex: 1,
+    marginRight: 8,
+  },
+  joinedBadgePill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  joinedBadgeTextPill: {
+    fontSize: 10,
     fontWeight: '700',
   },
-  bannerDesc: {
-    fontSize: 12,
+  whatsappFab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+
+  // ── 2. Dedicated Chat Screen Styles (Reference Screen 2) ──────────────────
+  chatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  chatHeaderBackBtn: {
+    paddingRight: 12,
+    paddingVertical: 4,
+  },
+  chatHeaderAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  chatHeaderAvatarText: {
+    fontSize: 18,
+  },
+  chatHeaderDetails: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  chatHeaderTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  chatHeaderStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 2,
   },
-  bannerMeta: {
+  greenDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#10b981',
+    marginRight: 5,
+  },
+  chatHeaderSubtitle: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '500',
   },
-  bannerMetaRow: {
+  chatHeaderJoinBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  joinedPillContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
   },
-  e2eeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  e2eeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  bubbleFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    marginTop: 4,
-  },
-  e2eeIndicatorText: {
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  joinBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  joinBtnText: {
-    fontSize: 13,
+  chatHeaderJoinText: {
+    fontSize: 12,
     fontWeight: '700',
   },
   postList: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   messageRow: {
     flexDirection: 'row',
     marginBottom: 12,
-    alignItems: 'flex-end',
+    maxWidth: '85%',
   },
   messageRowLeft: {
-    justifyContent: 'flex-start',
-    paddingRight: 40,
+    alignSelf: 'flex-start',
   },
   messageRowRight: {
-    justifyContent: 'flex-end',
-    paddingLeft: 40,
-  },
-  messageBubble: {
-    borderRadius: 16,
-    padding: 12,
-    maxWidth: '80%',
-    flex: 1,
-  },
-  messageBubbleSent: {
-    borderBottomRightRadius: 4,
-  },
-  messageBubbleReceived: {
-    borderBottomLeftRadius: 4,
-    borderWidth: 1,
-  },
-  bubbleHeader: {
-    marginBottom: 4,
-  },
-  postCard: {
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-  },
-  postHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
+    alignSelf: 'flex-end',
+    flexDirection: 'row-reverse',
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 8,
   },
   avatarText: {
+    fontSize: 11,
     fontWeight: '700',
-    fontSize: 14,
   },
-  authorMeta: {},
+  messageBubble: {
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1,
+  },
+  messageBubbleReceived: {
+    borderTopLeftRadius: 4,
+  },
+  messageBubbleSent: {
+    borderTopRightRadius: 4,
+    borderColor: 'transparent',
+  },
+  bubbleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 6,
+  },
   authorName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
   },
   authorRole: {
-    fontSize: 11,
+    fontSize: 10,
   },
   postContent: {
     fontSize: 14,
     lineHeight: 20,
   },
-  attachedPaperWrapper: {
-    marginTop: 10,
-    marginBottom: 4,
-  },
-  postFooter: {
-    marginTop: 12,
-    flexDirection: 'row',
-  },
-  postAction: {
+  bubbleFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 4,
-  },
-  actionText: {
-    fontSize: 12,
-  },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 30,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 12,
-  },
-  emptySub: {
-    fontSize: 14,
-    textAlign: 'center',
-    width: 240,
     marginTop: 4,
+    gap: 4,
   },
+  e2eeIndicatorText: {
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  attachedPaperWrapper: {
+    marginTop: 8,
+  },
+  emptyChatState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    paddingHorizontal: 40,
+  },
+  emptyChatCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyChatTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  emptyChatDesc: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+
+  // ── Input Bar Styles ───────────────────────────────────────────────────────
   inputContainer: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderTopWidth: 1,
   },
@@ -1053,92 +1286,118 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
     marginBottom: 8,
   },
   attachmentName: {
     fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 6,
     flex: 1,
+    marginLeft: 6,
   },
   removeAttachment: {
-    padding: 2,
+    padding: 4,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   attachBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
   textInput: {
     flex: 1,
+    minHeight: 40,
+    maxHeight: 100,
     borderRadius: 20,
-    borderWidth: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     fontSize: 14,
-    maxHeight: 100,
-    marginRight: 8,
+    borderWidth: 1,
   },
   sendBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   lockedInput: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    padding: 16,
     borderTopWidth: 1,
     alignItems: 'center',
   },
   lockedText: {
     fontSize: 13,
     textAlign: 'center',
+    marginBottom: 10,
+  },
+  lockedJoinBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 16,
+  },
+  lockedJoinBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  // ── General Modals & Empty States ──────────────────────────────────────────
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 80,
+    paddingHorizontal: 32,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  emptySub: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
   modalCard: {
-    width: '100%',
-    borderRadius: 16,
-    borderWidth: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     padding: 20,
-    elevation: 10,
+    borderWidth: 1,
   },
   pickerModalCard: {
-    height: '75%',
+    maxHeight: '75%',
   },
   modalHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 16,
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   modalCloseBtn: {
     padding: 4,
   },
-  modalBody: {},
+  modalBody: {
+    marginBottom: 10,
+  },
   inputLabel: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     marginBottom: 6,
   },
   input: {
@@ -1147,10 +1406,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     borderWidth: 1,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   descInput: {
-    height: 80,
+    height: 70,
     textAlignVertical: 'top',
   },
   rowFields: {
@@ -1162,14 +1421,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 8,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 6,
   },
   submitBtnText: {
     fontSize: 14,
     fontWeight: '700',
   },
   pickerCenter: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 40,
@@ -1197,52 +1455,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginTop: 10,
-  },
-  guestLockedContainer: {
-    flex: 1,
-  },
-  guestLockCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingBottom: 40,
-  },
-  guestLockIconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
-  },
-  guestLockTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 10,
-    letterSpacing: -0.3,
-  },
-  guestLockDesc: {
-    fontSize: 14,
-    lineHeight: 21,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  guestSignInBtn: {
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  guestSignInBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
   },
 });
