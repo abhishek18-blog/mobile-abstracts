@@ -666,8 +666,25 @@ let activeRecPromise: Promise<Paper[]> | null = null;
 
 // 3. Official Semantic Scholar API Key:
 //    Reads from Expo env variables (EXPO_PUBLIC_SEMANTIC_SCHOLAR_API_KEY).
-//    When provided, includes 'x-api-key' header in direct requests to unlock official high rate limits (10,000+ reqs/min).
+//    When provided, includes 'x-api-key' header in direct requests.
 let configuredSemanticScholarApiKey = process.env.EXPO_PUBLIC_SEMANTIC_SCHOLAR_API_KEY || '';
+
+// 4. Semantic Scholar Rate Limiter (1 request/second hard cap):
+//    S2 enforces a cumulative 1 req/sec limit across all endpoints.
+//    This guard tracks the timestamp of the last direct S2 request and
+//    inserts a minimum 1100ms gap before firing the next one (10% safety buffer).
+let lastS2RequestTime = 0;
+const S2_MIN_INTERVAL_MS = 1100; // 1.1 seconds between direct S2 calls
+
+const s2RateLimitedFetch = async (url: string, options: RequestInit): Promise<Response> => {
+  const now = Date.now();
+  const elapsed = now - lastS2RequestTime;
+  if (elapsed < S2_MIN_INTERVAL_MS) {
+    await new Promise(resolve => setTimeout(resolve, S2_MIN_INTERVAL_MS - elapsed));
+  }
+  lastS2RequestTime = Date.now();
+  return fetch(url, options);
+};
 
 /**
  * Dynamically set or update the Semantic Scholar API Key at runtime.
@@ -764,7 +781,7 @@ export const recommendationApi = {
           headers['x-api-key'] = configuredSemanticScholarApiKey;
         }
 
-        const s2Res = await fetch(s2Url, { headers });
+        const s2Res = await s2RateLimitedFetch(s2Url, { headers });
 
         if (s2Res.ok) {
           const s2Data = await s2Res.json();
