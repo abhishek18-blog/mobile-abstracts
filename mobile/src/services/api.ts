@@ -12,8 +12,16 @@ import {
 
 import Constants from 'expo-constants';
 
-// Automatically resolve host IP during development using Expo Constants, or fallback to Render URL
+// Automatically resolve host IP during development using Expo Constants, or use Render URL.
+// Priority: EXPO_PUBLIC_API_URL env var > Expo debugger host (local dev) > hardcoded fallback
 const getDynamicApiUrl = () => {
+  // If the .env explicitly sets an API URL, always use it (works for both dev + prod)
+  const envUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (envUrl) {
+    const clean = envUrl.replace(/\/$/, '');
+    return clean.endsWith('/api') ? clean : `${clean}/api`;
+  }
+
   if (!__DEV__) {
     return 'https://abstracts-researchhub.onrender.com/api';
   }

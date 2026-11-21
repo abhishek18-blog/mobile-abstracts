@@ -1,3 +1,6 @@
+// MUST be the very first import — polyfills crypto.getRandomValues for @noble/ciphers
+import 'react-native-get-random-values';
+
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

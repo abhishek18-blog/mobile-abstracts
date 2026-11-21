@@ -29,6 +29,7 @@
     "lucide-react-native": "^0.475.0",
     "react": "19.3.0",
     "react-native": "0.88.1",
+    "react-native-get-random-values": "^2.1.0",
     "react-native-paper": "^5.12.5",
     "react-native-safe-area-context": "~5.11.1",
     "react-native-screens": "~4.30.1",
