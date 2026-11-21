@@ -89,6 +89,7 @@ export interface CommunityPost {
   likes: number;
   author?: { name: string; avatar_initials: string; avatar_url?: string; role: string };
   created_at: string;
+  isE2EE?: boolean;
 }
 
 export type ApiResponse<T> =

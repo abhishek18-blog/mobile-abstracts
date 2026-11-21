@@ -14,9 +14,10 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Users, Plus, X, Paperclip, Send, BookOpen, Tag } from 'lucide-react-native';
+import { Users, Plus, X, Paperclip, Send, BookOpen, Tag, Lock } from 'lucide-react-native';
 import { Community, CommunityPost, Paper } from '../types';
 import { communityApi, papersApi, cachePapers } from '../services/api';
+import { encryptionService } from '../services/encryptionService';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { PaperCard } from '../components/PaperCard';
@@ -49,11 +50,24 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   const [savedPapers, setSavedPapers] = useState<Paper[]>([]);
   const [loadingPapers, setLoadingPapers] = useState(false);
 
+  const decryptPosts = async (posts: CommunityPost[], communityId: string): Promise<CommunityPost[]> => {
+    return Promise.all(
+      posts.map(async (p) => {
+        if (encryptionService.isEncrypted(p.content)) {
+          const decrypted = await encryptionService.decryptCommunityMessage(p.content, communityId);
+          return { ...p, content: decrypted, isE2EE: true };
+        }
+        return p;
+      })
+    );
+  };
+
   const selectCommunityWithDetails = async (communityId: string) => {
     try {
       const res = await communityApi.getById(communityId);
       if (res.success && res.data) {
-        setSelectedCommunity(res.data);
+        const decryptedPosts = await decryptPosts(res.data.posts || [], communityId);
+        setSelectedCommunity({ ...res.data, posts: decryptedPosts });
       }
     } catch (err) {
       console.warn('Failed to load community details:', err);
@@ -97,7 +111,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           const newPostsJson = JSON.stringify(res.data.posts || []);
           const currentPostsJson = JSON.stringify(selectedCommunity.posts || []);
           if (newPostsJson !== currentPostsJson) {
-            setSelectedCommunity(res.data);
+            const decryptedPosts = await decryptPosts(res.data.posts || [], selectedCommunity.id);
+            setSelectedCommunity(prev => (prev ? { ...prev, ...res.data, posts: decryptedPosts } : null));
           }
         }
       } catch (err) {
@@ -196,7 +211,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       author: { name: 'You (Researcher)', role: 'Contributor', avatar_initials: 'ME' },
       likes: 0,
       created_at: new Date().toISOString(),
-      papers: papersAttached
+      papers: papersAttached,
+      isE2EE: true,
     };
 
     // Optimistically update the UI so they see the message instantly
@@ -215,8 +231,11 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     setAttachedPaper(null);
 
     try {
+      // 🔒 End-to-End Encryption: Encrypt message content with AES-256-GCM before transmitting
+      const encryptedContent = await encryptionService.encryptCommunityMessage(typedContent, selectedCommunity.id);
+
       const res = await communityApi.createPost(selectedCommunity.id, {
-        content: typedContent,
+        content: encryptedContent,
         paper_ids: paperIds,
       });
 
@@ -231,12 +250,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
         });
         Alert.alert('Error', res.error || 'Failed to post message.');
       } else {
-        // Swap out the temp post with the real one returned from server
+        // Swap out the temp post with the real one returned from server (using decrypted text locally)
         setSelectedCommunity(prev => {
           if (!prev) return null;
           return {
             ...prev,
-            posts: (prev.posts || []).map(p => p.id === tempPostId ? res.data : p)
+            posts: (prev.posts || []).map(p => p.id === tempPostId ? { ...res.data, content: typedContent, isE2EE: true } : p)
           };
         });
       }
@@ -382,9 +401,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             <View style={styles.bannerInfo}>
               <Text style={[styles.bannerTitle, { color: colors.text }]}>{selectedCommunity.name}</Text>
               <Text style={[styles.bannerDesc, { color: colors.textMuted }]}>{selectedCommunity.description}</Text>
-              <Text style={[styles.bannerMeta, { color: colors.primary }]}>
-                {selectedCommunity.memberCount || 1} members · {selectedCommunity.subject}
-              </Text>
+              <View style={styles.bannerMetaRow}>
+                <Text style={[styles.bannerMeta, { color: colors.primary }]}>
+                  {selectedCommunity.memberCount || 1} members · {selectedCommunity.subject}
+                </Text>
+                <View style={[styles.e2eeBadge, { backgroundColor: colors.primary + '18' }]}>
+                  <Lock size={10} color={colors.primary} />
+                  <Text style={[styles.e2eeBadgeText, { color: colors.primary }]}>E2EE (AES-256)</Text>
+                </View>
+              </View>
             </View>
 
             <TouchableOpacity
@@ -456,6 +481,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                         {item.content}
                       </Text>
                     ) : null}
+
+                    {item.isE2EE && (
+                      <View style={[styles.bubbleFooter, isOwnMessage && { justifyContent: 'flex-end' }]}>
+                        <Lock size={10} color={isOwnMessage ? primaryBtnTextColor : colors.textMuted} style={{ opacity: 0.7 }} />
+                        <Text style={[styles.e2eeIndicatorText, { color: isOwnMessage ? primaryBtnTextColor : colors.textMuted, opacity: 0.7 }]}>
+                          Encrypted
+                        </Text>
+                      </View>
+                    )}
 
                     {/* Attached Papers Display */}
                     {item.papers && item.papers.length > 0 && (
@@ -750,7 +784,34 @@ const styles = StyleSheet.create({
   bannerMeta: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  bannerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginTop: 6,
+  },
+  e2eeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  e2eeBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  bubbleFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: 4,
+  },
+  e2eeIndicatorText: {
+    fontSize: 10,
+    fontWeight: '600',
   },
   joinBtn: {
     paddingHorizontal: 16,
