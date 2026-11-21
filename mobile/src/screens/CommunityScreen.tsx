@@ -28,7 +28,7 @@ interface CommunityScreenProps {
 
 export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper }) => {
   const { colors, theme } = useTheme();
-  const { user } = useAuth();
+  const { user, isGuest, logout } = useAuth();
   
   // State
   const [communities, setCommunities] = useState<Community[]>([]);
@@ -50,6 +50,17 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   const [savedPapers, setSavedPapers] = useState<Paper[]>([]);
   const [loadingPapers, setLoadingPapers] = useState(false);
 
+  const promptGuestSignIn = (communityName?: string) => {
+    Alert.alert(
+      'Sign In Required',
+      `Guests are in search and read-only mode. Please sign in as a registered researcher to ${communityName ? `view and participate in "${communityName}"` : 'create research groups and post messages'}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign In', onPress: () => logout() },
+      ]
+    );
+  };
+
   const decryptPosts = async (posts: CommunityPost[], communityId: string): Promise<CommunityPost[]> => {
     return Promise.all(
       posts.map(async (p) => {
@@ -63,6 +74,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   };
 
   const selectCommunityWithDetails = async (communityId: string) => {
+    if (isGuest) {
+      const found = communities.find(c => c.id === communityId);
+      if (found) {
+        setSelectedCommunity({ ...found, posts: [] });
+      }
+      return;
+    }
+
     try {
       const res = await communityApi.getById(communityId);
       if (res.success && res.data) {
@@ -80,15 +99,20 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       if (res.success && res.data) {
         // Sanitize out any legacy mock comm- entries
         const valid = res.data.filter(c => c && c.id && !c.id.startsWith('comm-'));
-        setCommunities(valid.length > 0 ? valid : res.data);
+        const listToUse = valid.length > 0 ? valid : res.data;
+        setCommunities(listToUse);
         
         // Retain or select active community
-        const listToUse = valid.length > 0 ? valid : res.data;
         if (listToUse.length > 0) {
           const currentValid = selectedCommunity && !selectedCommunity.id.startsWith('comm-');
           const activeId = currentValid ? selectedCommunity.id : listToUse[0].id;
           if (activeId && !activeId.startsWith('comm-')) {
-            await selectCommunityWithDetails(activeId);
+            if (isGuest) {
+              const target = listToUse.find(c => c.id === activeId) || listToUse[0];
+              setSelectedCommunity({ ...target, posts: [] });
+            } else {
+              await selectCommunityWithDetails(activeId);
+            }
           }
         }
       }
@@ -104,9 +128,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     fetchCommunities();
   }, []);
 
-  // Poll for new messages every 3 seconds to keep chat real-time
+  // Poll for new messages every 3 seconds to keep chat real-time (bypassed for guests)
   useEffect(() => {
-    if (!selectedCommunity || !selectedCommunity.id || selectedCommunity.id.startsWith('comm-')) return;
+    if (isGuest || !selectedCommunity || !selectedCommunity.id || selectedCommunity.id.startsWith('comm-')) return;
 
     let consecutiveErrors = 0;
     const pollInterval = setInterval(async () => {
@@ -136,9 +160,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     }, 3000);
 
     return () => clearInterval(pollInterval);
-  }, [selectedCommunity?.id]);
+  }, [selectedCommunity?.id, isGuest]);
 
   const handleJoin = async (id: string) => {
+    if (isGuest) {
+      promptGuestSignIn(selectedCommunity?.name);
+      return;
+    }
     try {
       const res = await communityApi.join(id);
       if (res.success) {
@@ -156,6 +184,11 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   };
 
   const handleCreateGroup = async () => {
+    if (isGuest) {
+      promptGuestSignIn();
+      return;
+    }
+
     if (!groupName.trim()) {
       Alert.alert('Group Name Required', 'Please enter a name for the research group.');
       return;
@@ -211,6 +244,11 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   };
 
   const handleSendPost = async () => {
+    if (isGuest) {
+      promptGuestSignIn(selectedCommunity?.name);
+      return;
+    }
+
     if (!postContent.trim() && !attachedPaper) {
       Alert.alert('Empty Post', 'Please type a message or attach a paper to post.');
       return;
@@ -365,7 +403,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           <Text style={[styles.title, { color: colors.text }]}>Communities</Text>
           <TouchableOpacity 
             style={[styles.createBtn, { backgroundColor: colors.primary }]}
-            onPress={() => setIsGroupModalOpen(true)}
+            onPress={() => {
+              if (isGuest) {
+                promptGuestSignIn();
+              } else {
+                setIsGroupModalOpen(true);
+              }
+            }}
           >
             <Plus size={16} color={primaryBtnTextColor} />
             <Text style={[styles.createBtnText, { color: primaryBtnTextColor }]}>New Group</Text>
@@ -384,7 +428,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                 { backgroundColor: colors.card, borderColor: colors.border },
                 selectedCommunity?.id === item.id && { backgroundColor: colors.primary, borderColor: colors.primary },
               ]}
-              onPress={() => selectCommunityWithDetails(item.id)}
+              onPress={() => {
+                if (isGuest) {
+                  setSelectedCommunity({ ...item, posts: [] });
+                  promptGuestSignIn(item.name);
+                } else {
+                  selectCommunityWithDetails(item.id);
+                }
+              }}
             >
               <Text
                 style={[
@@ -404,6 +455,55 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       {loading && !refreshing ? (
         <View style={styles.center}>
           <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : isGuest ? (
+        <View style={styles.guestLockedContainer}>
+          {selectedCommunity && (
+            <View style={[styles.banner, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+              <View style={styles.bannerInfo}>
+                <Text style={[styles.bannerTitle, { color: colors.text }]}>{selectedCommunity.name}</Text>
+                <Text style={[styles.bannerDesc, { color: colors.textMuted }]}>{selectedCommunity.description}</Text>
+                <View style={styles.bannerMetaRow}>
+                  <Text style={[styles.bannerMeta, { color: colors.primary }]}>
+                    {selectedCommunity.memberCount || 1} members · {selectedCommunity.subject}
+                  </Text>
+                  <View style={[styles.e2eeBadge, { backgroundColor: colors.primary + '18' }]}>
+                    <Lock size={10} color={colors.primary} />
+                    <Text style={[styles.e2eeBadgeText, { color: colors.primary }]}>Members Only</Text>
+                  </View>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.joinBtn, { backgroundColor: colors.primary }]}
+                onPress={() => promptGuestSignIn(selectedCommunity.name)}
+              >
+                <Text style={[styles.joinBtnText, { color: primaryBtnTextColor }]}>
+                  Join
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={styles.guestLockCenter}>
+            <View style={[styles.guestLockIconCircle, { backgroundColor: colors.primary + '18' }]}>
+              <Lock size={40} color={colors.primary} />
+            </View>
+            <Text style={[styles.guestLockTitle, { color: colors.text }]}>
+              Discussions Are Members Only
+            </Text>
+            <Text style={[styles.guestLockDesc, { color: colors.textMuted }]}>
+              Guest mode is strictly search and read-only for research papers. Sign in as a registered researcher to view messages, participate in discussions, and collaborate with authors.
+            </Text>
+            <TouchableOpacity
+              style={[styles.guestSignInBtn, { backgroundColor: colors.primary }]}
+              onPress={() => logout()}
+            >
+              <Text style={[styles.guestSignInBtnText, { color: primaryBtnTextColor }]}>
+                Sign In / Create Account
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : selectedCommunity ? (
         <KeyboardAvoidingView 
@@ -1097,5 +1197,52 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginTop: 10,
+  },
+  guestLockedContainer: {
+    flex: 1,
+  },
+  guestLockCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingBottom: 40,
+  },
+  guestLockIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  guestLockTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 10,
+    letterSpacing: -0.3,
+  },
+  guestLockDesc: {
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  guestSignInBtn: {
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  guestSignInBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

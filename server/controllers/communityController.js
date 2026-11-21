@@ -81,6 +81,22 @@ export const getCommunityById = async (req, res) => {
     const membersCount = membersRaw.length;
     const isMember = !!isMemberDoc; // converts to simple true/false
 
+    // [SECURITY - GUEST]: Guests are strictly search & read-only and cannot see community posts/messages
+    if (!req.userId) {
+      return res.json({
+        success: true,
+        data: {
+          ...community,
+          id: community._id,
+          memberCount: membersCount,
+          postCount: postsRaw.length,
+          isMember: false,
+          members: [], // Hidden for guests
+          posts: [],   // Messages strictly hidden for guests
+        },
+      });
+    }
+
     // [SECURITY]: Content Hiding for Private Communities
     // If the community is private and the user is not a member, we intentionally 
     // hide all posts and member data from the API response payload.
