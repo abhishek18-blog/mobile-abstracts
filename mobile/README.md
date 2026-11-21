@@ -98,3 +98,59 @@ The mobile app includes a client-side End-to-End Encryption system located in:
    - For direct messaging between two users, the service provides `encryptDirectMessage` and `decryptDirectMessage`.
    - Generates an **X25519 (Curve25519)** asymmetric keypair on the device.
    - Derives a pairwise AES-256 session key via Elliptic-Curve Diffie-Hellman (ECDH) without transmitting secret keys across the network.
+
+### Message Delivery Journey (How Messages Travel Between Users)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Alice as 📱 Alice (Sender Phone)
+    participant Net as 🌐 Carrier (HTTPS Protocol)
+    participant Server as 🏢 Dispatcher (Node.js / Express)
+    participant Atlas as 📦 Lockbox (MongoDB Atlas)
+    actor Bob as 📱 Bob (Receiver Phone)
+
+    Note over Alice: Stage 1: The Packaging
+    Alice->>Alice: Local encryptionService locks message<br/>"Hello Bob" → E2EE:v1:aes-gcm:5b5f...:095c...
+
+    Note over Alice,Server: Stage 2: The Courier Truck
+    Alice->>Net: HTTPS POST /api/community/:id/posts (Ciphertext)
+    Net->>Server: Delivers encrypted payload over TLS
+
+    Note over Server,Atlas: Stage 3: The Sorting Center
+    Server->>Server: Verifies Alice's JWT token & membership
+    Server->>Atlas: Saves ciphertext in MongoDB Atlas
+    Note over Atlas: Database holds unreadable ciphertext only
+
+    Note over Server,Bob: Stage 4: The Delivery / Pickup
+    Bob->>Server: HTTPS GET /api/community/:id (Active Polling Loop)
+    Server->>Bob: Returns new posts (including Alice's encrypted box)
+
+    Note over Bob: Stage 5: The Unboxing
+    Bob->>Bob: Local encryptionService unlocks ciphertext<br/>E2EE:v1:aes-gcm:... → "Hello Bob"
+```
+
+### Delivery Roles & Responsibilities
+
+| Role | Real-Life Analogy | Who Does It in This Project |
+|---|---|---|
+| **Packaging Agent** | Locks letter in an unbreakable safe | `encryptionService.ts` on Alice’s phone (runs **AES-256-GCM**). |
+| **Courier Truck** | Drives safe over secure highway | **HTTPS / TLS Network Protocol** (Fetch API request). |
+| **Sorting Center** | Verifies ID and checks permission | **Express.js API** (`server/controllers/communityController.js`). |
+| **Storage Warehouse** | Holds locked safe with zero knowledge | **MongoDB Atlas** (`CommunityPost` collection). |
+| **Mail Carrier** | Delivers new mail to Bob's front door | **Active Poller** in `CommunityScreen.tsx` (`setInterval` every 3s). |
+| **Local Device Cache** | Offline storage on the user's phone | **`AsyncStorage`** (`@offline_communities` key). |
+| **Receiver Key** | Unlocks the safe locally | `encryptionService.ts` on Bob’s phone using local Room Key. |
+
+### 💾 Local Storage & Offline Mode
+* **Phone Storage**: Messages and community posts are cached locally in the device's persistent storage (`AsyncStorage` under `@offline_communities`).
+* **Offline Access**: When the phone is offline or in airplane mode, `communityApi.getById` loads the cached posts directly from device storage.
+* **Instant UI (Optimistic Send)**: Outgoing messages are rendered immediately in the chat view before the network request finishes.
+
+### 🔄 Comparison with WhatsApp
+* **This Project (HTTP Polling + Local Storage)**:
+  * Devices query the backend every 3 seconds for new community messages.
+  * Stateless and serverless-friendly; messages are backed up in MongoDB Atlas as ciphertext.
+* **WhatsApp (Persistent Live Socket + Push Notification)**:
+  * Maintains an open TCP/WebSocket connection directly to chat brokers for ~50ms delivery.
+  * Uses **FCM** (Android) and **APNs** (iOS) push notifications to wake devices when the app is backgrounded.

@@ -210,18 +210,55 @@ Integrated Firebase Analytics to automatically track user behavior and engagemen
 sequenceDiagram
     autonumber
     actor Alice as 📱 Alice (Sender Phone)
-    participant Server as ☁️ Node.js API
-    participant Atlas as 🍃 MongoDB Atlas
+    participant Net as 🌐 Carrier (HTTPS Protocol)
+    participant Server as 🏢 Dispatcher (Node.js / Express)
+    participant Atlas as 📦 Lockbox (MongoDB Atlas)
     actor Bob as 📱 Bob (Receiver Phone)
 
-    Note over Alice,Bob: 🔒 Local E2EE Service (AES-256-GCM + HKDF)
-    Alice->>Alice: Encrypts "Paper draft ready!"<br/>→ "E2EE:v1:aes-gcm:5b5f...:095c..."
-    Alice->>Server: POST /api/community/:id/posts (Ciphertext)
-    Server->>Atlas: Saves ciphertext (Zero Knowledge)
-    Note over Atlas: Database only holds unreadable ciphertext
-    Server->>Bob: Pushes / Polls post (Ciphertext)
-    Bob->>Bob: Decrypts with local Room Key<br/>→ "Paper draft ready!"
+    Note over Alice: Stage 1: The Packaging
+    Alice->>Alice: Local encryptionService locks message<br/>"Paper draft ready!" → E2EE:v1:aes-gcm:5b5f...:095c...
+
+    Note over Alice,Server: Stage 2: The Courier Truck
+    Alice->>Net: HTTPS POST /api/community/:id/posts (Ciphertext)
+    Net->>Server: Delivers encrypted payload over TLS
+
+    Note over Server,Atlas: Stage 3: The Sorting Center
+    Server->>Server: Verifies Alice's JWT token & membership
+    Server->>Atlas: Saves ciphertext in MongoDB Atlas
+    Note over Atlas: Database holds unreadable ciphertext only
+
+    Note over Server,Bob: Stage 4: The Delivery / Pickup
+    Bob->>Server: HTTPS GET /api/community/:id (Active Polling Loop)
+    Server->>Bob: Returns new posts (including Alice's encrypted box)
+
+    Note over Bob: Stage 5: The Unboxing
+    Bob->>Bob: Local encryptionService unlocks ciphertext<br/>E2EE:v1:aes-gcm:... → "Paper draft ready!"
 ```
+
+#### Message Delivery Roles & Responsibilities
+
+| Role | Real-Life Analogy | Who Does It in This Project |
+|---|---|---|
+| **Packaging Agent** | Locks letter in an unbreakable safe | `encryptionService.ts` on Alice’s phone (runs **AES-256-GCM**). |
+| **Courier Truck** | Drives safe over secure highway | **HTTPS / TLS Network Protocol** (Fetch API request). |
+| **Sorting Center** | Verifies ID and checks permission | **Express.js API** (`server/controllers/communityController.js`). |
+| **Storage Warehouse** | Holds locked safe with zero knowledge | **MongoDB Atlas** (`CommunityPost` collection). |
+| **Mail Carrier** | Delivers new mail to Bob's front door | **Active Poller** in `CommunityScreen.tsx` (`setInterval` every 3s). |
+| **Local Device Cache** | Offline storage on the user's phone | **`AsyncStorage`** (`@offline_communities` key). |
+| **Receiver Key** | Unlocks the safe locally | `encryptionService.ts` on Bob’s phone using local Room Key. |
+
+#### Local Storage & Offline Capability
+- **Persistence**: Whenever posts are fetched or sent, `persistLocalCommunities` writes them directly to the phone's sandboxed local storage (`AsyncStorage`).
+- **Offline Mode**: If the user loses internet connection or opens the app in airplane mode, `communityApi.getById` instantly retrieves the posts from the phone's disk. `CommunityScreen.tsx` decrypts them locally so the user can read their chat history with zero network access.
+
+#### Comparison with WhatsApp Architecture
+- **In this App (HTTP Polling + Local Cache)**:
+  - Recipient devices periodically query the server (`GET /api/community/:id` every 3 seconds).
+  - Simpler, serverless-friendly, and requires no persistent TCP socket state on the backend.
+- **In WhatsApp (Persistent Socket + Push Notification)**:
+  - Devices maintain a continuous open **WebSocket/TCP socket** directly to the chat broker.
+  - Messages are pushed downstream to recipient sockets in ~50ms.
+  - When the app is closed or backgrounded, the server dispatches a silent push notification via **FCM** (Android) or **APNs** (iOS) to wake the phone and trigger background decryption.
 
 ### 12. Secrets, API Keys & Git Hygiene
 - **What**: Strict isolation of environment variables, Google/Firebase service accounts, and mobile signing credentials from the version control system.
