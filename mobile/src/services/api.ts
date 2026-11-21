@@ -1077,7 +1077,17 @@ export const communityApi = {
 
   getById: async (id: string): Promise<ApiResponse<Community>> => {
     try {
-      return await request<Community>(`/community/${id}`);
+      const res = await request<Community>(`/community/${id}`);
+      if (res.success && res.data) {
+        const idx = localCommunities.findIndex(c => c.id === id);
+        if (idx !== -1) {
+          localCommunities[idx] = { ...localCommunities[idx], ...res.data };
+        } else {
+          localCommunities.push(res.data);
+        }
+        persistLocalCommunities(localCommunities);
+      }
+      return res;
     } catch {
       const found = localCommunities.find(c => c.id === id) || localCommunities[0];
       return { success: true, data: found };
@@ -1128,10 +1138,19 @@ export const communityApi = {
 
   createPost: async (communityId: string, data: { content: string; paper_ids?: string[] }): Promise<ApiResponse<CommunityPost>> => {
     try {
-      return await request<CommunityPost>(`/community/${communityId}/posts`, {
+      const res = await request<CommunityPost>(`/community/${communityId}/posts`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
+      if (res.success && res.data) {
+        const comm = localCommunities.find(c => c.id === communityId);
+        if (comm) {
+          comm.posts = comm.posts || [];
+          comm.posts.unshift(res.data);
+          persistLocalCommunities(localCommunities);
+        }
+      }
+      return res;
     } catch {
       const comm = localCommunities.find(c => c.id === communityId);
       const papersAttached = MOCK_PAPERS.filter(p => data.paper_ids?.includes(p.id));
