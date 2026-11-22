@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,250 +7,315 @@ import {
   Dimensions,
   Animated,
   ScrollView,
+  FlatList,
+  NativeSyntheticEvent,
+  NativeScrollEvent,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ArrowRight,
-  ChevronRight,
   Search,
-  Brain,
-  Users,
+  BookOpen,
+  FolderKanban,
+  Sparkles,
+  Globe,
 } from 'lucide-react-native';
-import { AbstractsLogo } from '../components/AbstractsLogo';
+import Svg, {
+  Path,
+  Defs,
+  LinearGradient,
+  Stop,
+  G,
+  Circle,
+} from 'react-native-svg';
 
-const { width, height } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DESIGN TOKENS — Dark-mode landing aesthetic
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const C = {
+  bg: '#0B0F17',
+  card: '#161E2E',
+  cardBorder: '#232E42',
+  accent: '#2563EB',
+  accentLight: '#3B82F6',
+  textPrimary: '#F8FAFC',
+  textMuted: '#94A3B8',
+  dotInactive: 'rgba(59, 130, 246, 0.25)',
+  ghostBorder: 'rgba(148, 163, 184, 0.30)',
+} as const;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CAROUSEL DATA — purely informational, no action links
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+interface SlideData {
+  id: string;
+  badge: string;
+  title: string;
+  body: string;
+  Icon: typeof Search;
+}
+
+const SLIDES: SlideData[] = [
+  {
+    id: 'discover',
+    badge: 'Discover',
+    title: 'Discover\nResearch',
+    body: 'Search millions of research papers by topic, author, or keyword — powered by smart semantic search.',
+    Icon: Search,
+  },
+  {
+    id: 'read',
+    badge: 'Read',
+    title: 'Read &\nBookmark',
+    body: 'Dive into full abstracts, track your reading progress, and bookmark papers that matter to you.',
+    Icon: BookOpen,
+  },
+  {
+    id: 'collaborate',
+    badge: 'Collaborate',
+    title: 'Collaborate\nWorldwide',
+    body: 'Join research communities, share insights, and discuss findings with fellow academics worldwide.',
+    Icon: Globe,
+  },
+  {
+    id: 'projects',
+    badge: 'Projects',
+    title: 'Organize\nYour Work',
+    body: 'Organize papers into focused projects, monitor citations, and build your personal research library.',
+    Icon: FolderKanban,
+  },
+];
+
+const CARD_H_PAD = 24;
+const SLIDE_WIDTH = SCREEN_WIDTH - CARD_H_PAD * 2;
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INLINE LOGO ICON (open-book glyph rendered via SVG — no external asset)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const LogoIcon: React.FC<{ size?: number }> = ({ size = 28 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    <Defs>
+      <LinearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+        <Stop offset="0%" stopColor="#60A5FA" />
+        <Stop offset="100%" stopColor="#2563EB" />
+      </LinearGradient>
+    </Defs>
+    <Path
+      d="M2 4.5C2 3.67 2.67 3 3.5 3H8c1.25 0 2.5.5 3.5 1.5A6.1 6.1 0 0115 3h4.5c.83 0 1.5.67 1.5 1.5v13c0 .83-.67 1.5-1.5 1.5H15c-1 0-2 .4-2.75 1.1a.5.5 0 01-.5 0C11 19.4 10 19 9 19H3.5A1.5 1.5 0 012 17.5V4.5z"
+      fill="url(#logoGrad)"
+      opacity={0.9}
+    />
+    <Path
+      d="M12 5.5V19"
+      stroke="#F8FAFC"
+      strokeWidth={1.4}
+      strokeLinecap="round"
+      opacity={0.6}
+    />
+  </Svg>
+);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// PROPS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 interface LandingScreenProps {
   onGetStarted: () => void;
   onGuestAccess: () => void;
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COMPONENT
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 export const LandingScreen: React.FC<LandingScreenProps> = ({
   onGetStarted,
   onGuestAccess,
 }) => {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(25)).current;
-  const cardFade = useRef(new Animated.Value(0)).current;
-  const cardSlide = useRef(new Animated.Value(40)).current;
-  const featureFade = useRef(new Animated.Value(0)).current;
+  const insets = useSafeAreaInsets();
+
+  // ── Entrance Animations ───────────────────────────────────────────────────
+  const heroOpacity = useRef(new Animated.Value(0)).current;
+  const heroSlide = useRef(new Animated.Value(28)).current;
+  const carouselOpacity = useRef(new Animated.Value(0)).current;
+  const carouselSlide = useRef(new Animated.Value(36)).current;
+  const ctaOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.sequence([
+    Animated.stagger(220, [
       Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 700,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 700,
-          useNativeDriver: true,
-        }),
+        Animated.timing(heroOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(heroSlide, { toValue: 0, duration: 600, useNativeDriver: true }),
       ]),
       Animated.parallel([
-        Animated.timing(cardFade, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(cardSlide, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        }),
+        Animated.timing(carouselOpacity, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(carouselSlide, { toValue: 0, duration: 500, useNativeDriver: true }),
       ]),
-      Animated.timing(featureFade, {
-        toValue: 1,
-        duration: 500,
-        useNativeDriver: true,
-      }),
+      Animated.timing(ctaOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
     ]).start();
   }, []);
 
+  // ── Carousel State ────────────────────────────────────────────────────────
+  const [activeIndex, setActiveIndex] = useState(0);
+  const listRef = useRef<FlatList<SlideData>>(null);
+
+  // Auto-advance every 5 s
+  useEffect(() => {
+    const id = setInterval(() => {
+      setActiveIndex((prev) => {
+        const next = (prev + 1) % SLIDES.length;
+        listRef.current?.scrollToOffset({ offset: SLIDE_WIDTH * next, animated: true });
+        return next;
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  const onScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const idx = Math.round(e.nativeEvent.contentOffset.x / SLIDE_WIDTH);
+      setActiveIndex(Math.max(0, Math.min(idx, SLIDES.length - 1)));
+    },
+    [],
+  );
+
+  // ── Render Slide ──────────────────────────────────────────────────────────
+  const renderSlide = useCallback(({ item }: { item: SlideData }) => {
+    const { Icon } = item;
+    return (
+      <View style={[styles.card, { width: SLIDE_WIDTH }]}>
+        {/* Icon badge */}
+        <View style={styles.cardIconWrap}>
+          <Icon size={26} color={C.accentLight} />
+        </View>
+
+        {/* Badge label */}
+        <View style={styles.cardBadge}>
+          <Text style={styles.cardBadgeText}>{item.badge}</Text>
+        </View>
+
+        {/* Title + body */}
+        <Text style={styles.cardTitle}>{item.title}</Text>
+        <Text style={styles.cardBody}>{item.body}</Text>
+      </View>
+    );
+  }, []);
+
+  // ── Main Render ───────────────────────────────────────────────────────────
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
       <StatusBar style="light" />
 
-      {/* Deep Space Background Glows (Matching Web App) */}
-      <View style={styles.bgBase} />
-      <View style={styles.glowIndigo} />
-      <View style={styles.glowBlue} />
-      <View style={styles.glowPurple} />
+      {/* Ambient background glows */}
+      <View style={styles.glowTopLeft} />
+      <View style={styles.glowBottomRight} />
 
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, 20) + 12 }]}
           showsVerticalScrollIndicator={false}
+          bounces={false}
         >
-          {/* Header / Navbar - Matching Web Floating Navbar */}
-          <View style={styles.navBar}>
-            <View style={styles.navPill}>
-              {/* Brand Logo - Official SVG Logo */}
-              <AbstractsLogo width={100} height={36} textColor="#0f172a" primaryColor="#2563eb" />
-
-              <View style={styles.navActions}>
-                <TouchableOpacity
-                  onPress={onGuestAccess}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Text style={styles.navGuestLink}>Explore as Guest</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.signInBtn}
-                  onPress={onGetStarted}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.signInText}>Sign In</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-          {/* Hero Section */}
+          {/* ── HEADER ──────────────────────────────────────────────────── */}
           <Animated.View
             style={[
-              styles.heroSection,
-              {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }],
-              },
+              styles.header,
+              { opacity: heroOpacity, transform: [{ translateY: heroSlide }] },
             ]}
           >
-            <Text style={styles.heroTitle}>
-              Accelerate your{'\n'}
-              <Text style={styles.heroTitleHighlight}>discovery process.</Text>
-            </Text>
-
-            <Text style={styles.heroSubtitle}>
-              The all-in-one workspace for researchers. Leverage advanced AI to
-              synthesize papers, uncover insights, and collaborate with brilliant
-              minds worldwide.
-            </Text>
-
-            {/* CTA Buttons */}
-            <View style={styles.ctaContainer}>
-              <TouchableOpacity
-                style={styles.primaryCta}
-                onPress={onGetStarted}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.primaryCtaText}>Start researching</Text>
-                <ArrowRight size={17} color="#0f172a" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.secondaryCta}
-                onPress={onGuestAccess}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.secondaryCtaText}>Try without account</Text>
-                <ChevronRight size={17} color="rgba(255,255,255,0.6)" />
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-
-          {/* Paper Interactive Preview Card (Web Mockup Parity) */}
-          <Animated.View
-            style={[
-              styles.previewCardContainer,
-              {
-                opacity: cardFade,
-                transform: [{ translateY: cardSlide }],
-              },
-            ]}
-          >
-            <View style={styles.previewCardInner}>
-              {/* Window Header Dots */}
-              <View style={styles.previewWindowHeader}>
-                <View style={styles.previewDots}>
-                  <View style={[styles.dot, { backgroundColor: '#f87171' }]} />
-                  <View style={[styles.dot, { backgroundColor: '#fbbf24' }]} />
-                  <View style={[styles.dot, { backgroundColor: '#4ade80' }]} />
-                </View>
-                <View style={styles.previewHeaderTitleBox}>
-                  <Search size={13} color="#3b82f6" style={{ marginRight: 6 }} />
-                  <Text style={styles.previewHeaderTitle}>Paper Details</Text>
-                </View>
-              </View>
-
-              {/* Paper Content Body */}
-              <View style={styles.previewBody}>
-                <View style={styles.categoryBadge}>
-                  <Text style={styles.categoryBadgeText}>Computer Science · AI</Text>
-                </View>
-
-                <Text style={styles.paperTitle}>Attention Is All You Need</Text>
-                <Text style={styles.paperAuthors}>
-                  Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit...
-                </Text>
-
-                <Text style={styles.abstractHeading}>ABSTRACT</Text>
-                <Text style={styles.abstractBodyText} numberOfLines={4}>
-                  The dominant sequence transduction models are based on complex recurrent
-                  or convolutional neural networks that include an encoder and a decoder.
-                  We propose a new simple network architecture, the Transformer, based solely
-                  on attention mechanisms...
-                </Text>
-
-                {/* AI Assistant Icon Badge */}
-                <View style={styles.aiBadgeFloat}>
-                  <Brain size={20} color="#ffffff" />
-                </View>
-              </View>
-            </View>
-          </Animated.View>
-
-          {/* Features Section */}
-          <Animated.View style={[styles.featuresSection, { opacity: featureFade }]}>
-            <View style={styles.featuresHeader}>
-              <Text style={styles.featuresTitle}>Built for modern researchers</Text>
-              <Text style={styles.featuresSubtitle}>
-                Everything you need to discover, understand, and organize scientific
-                knowledge in one unified platform.
+            <View style={styles.headerBrand}>
+              <LogoIcon size={30} />
+              <Text style={styles.headerTitle}>
+                Abs<Text style={styles.headerTitleAccent}>tracts</Text>
               </Text>
             </View>
+          </Animated.View>
 
-            <View style={styles.featureCardsStack}>
-              {/* Feature 1: Semantic Discovery */}
-              <FeatureCard
-                icon={<Search size={22} color="#22d3ee" />}
-                title="Semantic Discovery"
-                description="Go beyond keyword search. Find highly relevant papers based on contextual meaning and conceptual overlap."
-                iconBg="rgba(6, 182, 212, 0.15)"
-                borderColor="rgba(6, 182, 212, 0.35)"
-                glowColor="rgba(34, 211, 238, 0.08)"
-              />
+          {/* ── HERO ────────────────────────────────────────────────────── */}
+          <Animated.View
+            style={[
+              styles.hero,
+              { opacity: heroOpacity, transform: [{ translateY: heroSlide }] },
+            ]}
+          >
+            <Text style={styles.heroHeadline}>
+              Discover. Read.{'\n'}
+              <Text style={styles.heroAccent}>Collaborate.</Text>
+            </Text>
+            <Text style={styles.heroSub}>
+              Your all-in-one research platform to find papers, join
+              discussions, and get paper recommendations.
+            </Text>
+          </Animated.View>
 
-              {/* Feature 2: AI Assistant
-              <FeatureCard
-                icon={<Brain size={22} color="#e879f9" />}
-                title="AI Assistant"
-                description="Chat with any paper. Extract methodologies, summarize findings, and clarify complex math instantly."
-                iconBg="rgba(168, 85, 247, 0.15)"
-                borderColor="rgba(168, 85, 247, 0.35)"
-                glowColor="rgba(232, 121, 249, 0.08)"
-              /> */}
+          {/* ── CAROUSEL ────────────────────────────────────────────────── */}
+          <Animated.View
+            style={{
+              opacity: carouselOpacity,
+              transform: [{ translateY: carouselSlide }],
+            }}
+          >
+            <FlatList
+              ref={listRef}
+              data={SLIDES}
+              renderItem={renderSlide}
+              keyExtractor={(s) => s.id}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              snapToAlignment="center"
+              contentContainerStyle={{ paddingHorizontal: CARD_H_PAD }}
+              onMomentumScrollEnd={onScrollEnd}
+              getItemLayout={(_, index) => ({
+                length: SLIDE_WIDTH,
+                offset: SLIDE_WIDTH * index,
+                index,
+              })}
+            />
 
-              {/* Feature 3: Collaborative Hub */}
-              <FeatureCard
-                icon={<Users size={22} color="#34d399" />}
-                title="Collaborative Hub"
-                description="Share libraries, annotate papers together, and discuss findings with your peers in real-time."
-                iconBg="rgba(16, 185, 129, 0.15)"
-                borderColor="rgba(16, 185, 129, 0.35)"
-                glowColor="rgba(52, 211, 153, 0.08)"
-              />
+            {/* Dot indicators */}
+            <View style={styles.dots}>
+              {SLIDES.map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.dot,
+                    i === activeIndex ? styles.dotActive : styles.dotInactive,
+                  ]}
+                />
+              ))}
             </View>
           </Animated.View>
 
-          {/* Footer Branding */}
+          {/* ── CTA BUTTONS ─────────────────────────────────────────────── */}
+          <Animated.View style={[styles.ctaBlock, { opacity: ctaOpacity }]}>
+            {/* Primary: Get Started → auth */}
+            <TouchableOpacity
+              style={styles.btnPrimary}
+              onPress={onGetStarted}
+              activeOpacity={0.88}
+            >
+              <Text style={styles.btnPrimaryText}>Get Started</Text>
+              <ArrowRight size={18} color="#ffffff" />
+            </TouchableOpacity>
+
+            {/* Secondary: Explore Papers → guest */}
+            <TouchableOpacity
+              style={styles.btnGhost}
+              onPress={onGuestAccess}
+              activeOpacity={0.75}
+            >
+              <Search size={17} color={C.textMuted} />
+              <Text style={styles.btnGhostText}>Explore Papers</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* ── FOOTER TAGLINE ──────────────────────────────────────────── */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Abstracts Research Platform © 2026</Text>
+            <View style={styles.footerRule} />
+            <Text style={styles.footerText}>Built for curious minds</Text>
+            <View style={styles.footerRule} />
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -258,370 +323,214 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   );
 };
 
-// Feature Card Component
-const FeatureCard: React.FC<{
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  iconBg: string;
-  borderColor: string;
-  glowColor: string;
-}> = ({ icon, title, description, iconBg, borderColor, glowColor }) => (
-  <View style={[styles.featureCard, { borderColor, backgroundColor: glowColor }]}>
-    <View style={[styles.featureIconWrapper, { backgroundColor: iconBg }]}>
-      {icon}
-    </View>
-    <Text style={styles.featureCardTitle}>{title}</Text>
-    <Text style={styles.featureCardDescription}>{description}</Text>
-  </View>
-);
-
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STYLES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 const styles = StyleSheet.create({
-  container: {
+  /* ── Layout ────────────────────────────────────────────────────────────── */
+  root: {
     flex: 1,
-    backgroundColor: '#070a14',
+    backgroundColor: C.bg,
   },
-  safeArea: {
+  safe: {
     flex: 1,
   },
-  scrollContent: {
+  scroll: {
     flexGrow: 1,
-    paddingHorizontal: 18,
   },
 
-  // Deep Space Ambient Glow Background Effects
-  bgBase: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: '#070a14',
-  },
-  glowIndigo: {
+  /* ── Ambient Glows ─────────────────────────────────────────────────────── */
+  glowTopLeft: {
     position: 'absolute',
-    top: -height * 0.1,
-    left: -width * 0.25,
-    width: width * 0.95,
-    height: width * 0.95,
-    borderRadius: width * 0.48,
-    backgroundColor: 'rgba(79, 70, 229, 0.22)',
+    top: -SCREEN_WIDTH * 0.25,
+    left: -SCREEN_WIDTH * 0.3,
+    width: SCREEN_WIDTH * 0.9,
+    height: SCREEN_WIDTH * 0.9,
+    borderRadius: SCREEN_WIDTH * 0.45,
+    backgroundColor: 'rgba(37, 99, 235, 0.14)',
   },
-  glowBlue: {
+  glowBottomRight: {
     position: 'absolute',
-    top: height * 0.15,
-    right: -width * 0.3,
-    width: width * 0.85,
-    height: width * 0.85,
-    borderRadius: width * 0.42,
-    backgroundColor: 'rgba(37, 99, 235, 0.18)',
-  },
-  glowPurple: {
-    position: 'absolute',
-    bottom: height * 0.05,
-    left: -width * 0.2,
-    width: width * 0.75,
-    height: width * 0.75,
-    borderRadius: width * 0.38,
-    backgroundColor: 'rgba(147, 51, 234, 0.12)',
+    bottom: -SCREEN_WIDTH * 0.15,
+    right: -SCREEN_WIDTH * 0.25,
+    width: SCREEN_WIDTH * 0.8,
+    height: SCREEN_WIDTH * 0.8,
+    borderRadius: SCREEN_WIDTH * 0.4,
+    backgroundColor: 'rgba(99, 102, 241, 0.09)',
   },
 
-  // Navbar Styling (Web Parity)
-  navBar: {
-    marginTop: 8,
-    marginBottom: 24,
+  /* ── Header ────────────────────────────────────────────────────────────── */
+  header: {
+    paddingHorizontal: CARD_H_PAD,
+    paddingTop: 12,
+    marginBottom: 28,
   },
-  navPill: {
+  headerBrand: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#ffffff',
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 24,
-    elevation: 12,
+    gap: 10,
   },
-  brandText: {
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: -0.5,
-  },
-  brandAbs: {
-    color: '#0f172a',
-  },
-  brandTracts: {
-    color: '#2563eb',
-  },
-  navActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  navGuestLink: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  signInBtn: {
-    backgroundColor: '#0f172a',
-    paddingHorizontal: 18,
-    paddingVertical: 9,
-    borderRadius: 999,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  signInText: {
-    color: '#ffffff',
-    fontSize: 12,
+  headerTitle: {
+    fontSize: 24,
     fontWeight: '800',
+    color: C.textPrimary,
+    letterSpacing: -0.4,
+  },
+  headerTitleAccent: {
+    color: C.accentLight,
   },
 
-  // Hero Section
-  heroSection: {
-    alignItems: 'center',
-    paddingTop: 16,
-    paddingBottom: 24,
+  /* ── Hero ───────────────────────────────────────────────────────────────── */
+  hero: {
+    paddingHorizontal: CARD_H_PAD,
+    marginBottom: 28,
   },
-  heroTitle: {
+  heroHeadline: {
     fontSize: 36,
     fontWeight: '900',
-    color: '#ffffff',
-    textAlign: 'center',
+    color: C.textPrimary,
     lineHeight: 44,
     letterSpacing: -1,
+    marginBottom: 12,
   },
-  heroTitleHighlight: {
-    color: '#38bdf8',
-    fontWeight: '900',
+  heroAccent: {
+    color: C.accentLight,
   },
-  heroSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.72)',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginTop: 14,
-    marginBottom: 26,
-    paddingHorizontal: 8,
+  heroSub: {
+    fontSize: 15,
     fontWeight: '400',
+    color: C.textMuted,
+    lineHeight: 23,
   },
 
-  // CTAs
-  ctaContainer: {
-    flexDirection: 'column',
-    width: '100%',
-    gap: 10,
-    alignItems: 'center',
-  },
-  primaryCta: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ffffff',
-    paddingVertical: 15,
-    borderRadius: 999,
-    gap: 8,
-    shadowColor: '#ffffff',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  primaryCtaText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#0f172a',
-  },
-  secondaryCta: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.18)',
-    paddingVertical: 14,
-    borderRadius: 999,
-    gap: 6,
-  },
-  secondaryCtaText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-
-  // Preview Mockup Card (Web Matching)
-  previewCardContainer: {
-    marginTop: 20,
+  /* ── Carousel Cards ────────────────────────────────────────────────────── */
+  card: {
+    backgroundColor: C.card,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    padding: 6,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.4,
-    shadowRadius: 32,
-    elevation: 16,
+    borderColor: C.cardBorder,
+    padding: 22,
   },
-  previewCardInner: {
+  cardIconWrap: {
+    width: 52,
+    height: 52,
     borderRadius: 16,
-    backgroundColor: '#ffffff',
-    overflow: 'hidden',
-  },
-  previewWindowHeader: {
-    flexDirection: 'row',
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: '#f8fafc',
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
+    justifyContent: 'center',
+    marginBottom: 14,
   },
-  previewDots: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  dot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-  },
-  previewHeaderTitleBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  previewHeaderTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1e293b',
-  },
-  previewBody: {
-    padding: 18,
-    position: 'relative',
-  },
-  categoryBadge: {
+  cardBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#dbeafe',
-    paddingHorizontal: 9,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(59, 130, 246, 0.14)',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
     borderRadius: 6,
     marginBottom: 10,
   },
-  categoryBadgeText: {
+  cardBadgeText: {
     fontSize: 11,
+    fontWeight: '700',
+    color: C.accentLight,
+    letterSpacing: 0.4,
+  },
+  cardTitle: {
+    fontSize: 22,
     fontWeight: '800',
-    color: '#1d4ed8',
+    color: C.textPrimary,
+    lineHeight: 28,
+    letterSpacing: -0.3,
+    marginBottom: 8,
   },
-  paperTitle: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#0f172a',
-    letterSpacing: -0.4,
-    marginBottom: 4,
-  },
-  paperAuthors: {
-    fontSize: 12,
-    color: '#64748b',
-    fontWeight: '500',
-    marginBottom: 14,
-  },
-  abstractHeading: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#334155',
-    letterSpacing: 1.5,
-    marginBottom: 6,
-  },
-  abstractBodyText: {
-    fontSize: 12.5,
-    color: '#475569',
-    lineHeight: 19,
-    paddingRight: 24,
-  },
-  aiBadgeFloat: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#4f46e5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#4f46e5',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
+  cardBody: {
+    fontSize: 13.5,
+    fontWeight: '400',
+    color: C.textMuted,
+    lineHeight: 20,
   },
 
-  // Features Section
-  featuresSection: {
-    marginTop: 40,
-  },
-  featuresHeader: {
+  /* ── Dot Indicators ────────────────────────────────────────────────────── */
+  dots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginTop: 18,
+    gap: 7,
   },
-  featuresTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    color: '#ffffff',
-    textAlign: 'center',
-    letterSpacing: -0.4,
-    marginBottom: 6,
+  dot: {
+    height: 7,
+    borderRadius: 3.5,
   },
-  featuresSubtitle: {
-    fontSize: 13.5,
-    color: 'rgba(255, 255, 255, 0.55)',
-    textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 10,
-    fontWeight: '400',
+  dotActive: {
+    width: 22,
+    backgroundColor: C.accent,
   },
-  featureCardsStack: {
+  dotInactive: {
+    width: 7,
+    backgroundColor: C.dotInactive,
+  },
+
+  /* ── CTA Buttons ───────────────────────────────────────────────────────── */
+  ctaBlock: {
+    paddingHorizontal: CARD_H_PAD,
+    marginTop: 32,
     gap: 12,
   },
-  featureCard: {
-    borderRadius: 20,
-    padding: 18,
-    borderWidth: 1,
-  },
-  featureIconWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+  btnPrimary: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    backgroundColor: C.accent,
+    paddingVertical: 17,
+    borderRadius: 16,
+    gap: 10,
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
   },
-  featureCardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
+  btnPrimaryText: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#ffffff',
-    marginBottom: 4,
+    letterSpacing: 0.2,
   },
-  featureCardDescription: {
-    fontSize: 12.5,
-    color: 'rgba(255, 255, 255, 0.65)',
-    lineHeight: 19,
-    fontWeight: '400',
+  btnGhost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.ghostBorder,
+    gap: 9,
+  },
+  btnGhostText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: C.textMuted,
+    letterSpacing: 0.1,
   },
 
-  // Footer
+  /* ── Footer ────────────────────────────────────────────────────────────── */
   footer: {
-    marginTop: 32,
-    marginBottom: 20,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 36,
+    paddingHorizontal: 36,
+    gap: 12,
+  },
+  footerRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: C.cardBorder,
   },
   footerText: {
-    fontSize: 11,
-    color: 'rgba(255, 255, 255, 0.35)',
+    fontSize: 12,
     fontWeight: '500',
+    color: C.textMuted,
+    fontStyle: 'italic',
   },
 });

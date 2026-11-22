@@ -865,7 +865,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   const handleToggleSavePaper = async (paperId: string) => {
     try {
-      const res = await papersApi.toggleSave(paperId);
+      const paperObj = selectedCommunity?.posts?.flatMap(p => p.papers || []).find(p => p.id === paperId);
+      const res = await papersApi.toggleSave(paperId, paperObj);
       if (res.success && res.data && selectedCommunity) {
         const updatedPosts = (selectedCommunity.posts || []).map((post) => {
           if (post.papers && post.papers.length > 0 && post.papers[0].id === paperId) {
@@ -1014,7 +1015,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           <FlatList<CommunityPost>
             ref={flatListRef}
             data={selectedCommunity.posts || []}
-            keyExtractor={(item: CommunityPost) => item.id}
+            keyExtractor={(item: CommunityPost, index: number) => (item?.id ? `${item.id}-${index}` : `post-${index}`)}
             onContentSizeChange={() => {
               flatListRef.current?.scrollToEnd({ animated: false });
             }}
@@ -1324,7 +1325,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           ) : (
             <FlatList<Community>
               data={filteredCommunities}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => (item?.id ? `${item.id}-${index}` : `comm-${index}`)}
               contentContainerStyle={styles.verticalListContent}
               refreshControl={
                 <RefreshControl
@@ -1765,7 +1766,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             ) : (
               <FlatList<Paper>
                 data={filteredSavedPapers}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, index) => (item?.id ? `${item.id}-${index}` : `saved-paper-${index}`)}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => (
                   <TouchableOpacity

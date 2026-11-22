@@ -101,8 +101,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
 
   const handleToggleSave = async (paperId: string) => {
     try {
-      const res = await papersApi.toggleSave(paperId);
-      if (res.success) {
+      const paperObj = papers.find(p => p.id === paperId);
+      const res = await papersApi.toggleSave(paperId, paperObj);
+      if (res.success && res.data) {
         setPapers((prev) =>
           prev.map((p) => (p.id === paperId ? { ...p, saved: res.data.saved } : p))
         );
@@ -379,7 +380,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
       ) : viewMode === 'list' ? (
         <FlatList<Paper>
           data={filteredPapers}
-          keyExtractor={(item: Paper) => item.id}
+          keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `paper-${index}`)}
           renderItem={({ item }: { item: Paper }) => (
             <PaperCard
               paper={item}
@@ -500,7 +501,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            keyExtractor={(item: Paper) => item.id}
+            keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `swipe-${index}`)}
             renderItem={renderSwipeCard}
             style={styles.swipeFlatList}
             contentContainerStyle={styles.swipeListContent}
@@ -750,7 +751,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
             ) : (
               <FlatList<Project>
                 data={projects}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, index) => (item?.id ? `${item.id}-${index}` : `proj-${index}`)}
                 style={{ maxHeight: 300 }}
                 renderItem={({ item }) => (
                   <TouchableOpacity

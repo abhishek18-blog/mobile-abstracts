@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Animated } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,13 @@ import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
 import { notificationService } from '../services/notificationService';
 
+// Memoize tab screen components so background tabs NEVER unnecessarily re-render on tab switch
+const MemoDiscoverScreen = React.memo(DiscoverScreen);
+const MemoLibraryScreen = React.memo(LibraryScreen);
+const MemoForYouScreen = React.memo(ForYouScreen);
+const MemoCommunityScreen = React.memo(CommunityScreen);
+const MemoSettingsScreen = React.memo(SettingsScreen);
+
 type TabName = 'discover' | 'library' | 'foryou' | 'community' | 'settings';
 
 export const AppNavigator: React.FC = () => {
@@ -31,49 +38,46 @@ export const AppNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { theme, colors } = useTheme();
 
-  // Lazy load tab instances so screens only mount when first visited
-  const [loadedTabs, setLoadedTabs] = useState<Record<TabName, boolean>>({
+  // All tabs are pre-mounted from the start for instantaneous, zero-delay tab switching
+  const [loadedTabs] = useState<Record<TabName, boolean>>({
     discover: true,
-    library: false,
-    foryou: false,
-    community: false,
-    settings: false,
+    library: true,
+    foryou: true,
+    community: true,
+    settings: true,
   });
 
-  // Native-driven 60fps opacities for seamless cross-fades without Yoga layout recalculation
-  const tabOpacities = useRef({
+  // Tactile spring scale animations for the bottom tab buttons
+  const tabScales = useRef<Record<TabName, Animated.Value>>({
     discover: new Animated.Value(1),
-    library: new Animated.Value(0),
-    foryou: new Animated.Value(0),
-    community: new Animated.Value(0),
-    settings: new Animated.Value(0),
+    library: new Animated.Value(1),
+    foryou: new Animated.Value(1),
+    community: new Animated.Value(1),
+    settings: new Animated.Value(1),
   }).current;
 
-  const handleTabChange = (newTab: TabName) => {
-    if (newTab === activeTab) return;
+  const handleSelectPaper = useCallback((id: string) => {
+    setSelectedPaperId(id);
+  }, []);
 
-    // Ensure target tab is mounted
-    if (!loadedTabs[newTab]) {
-      setLoadedTabs(prev => ({ ...prev, [newTab]: true }));
-    }
+  const handleTabChange = useCallback((newTab: TabName) => {
+    setActiveTab(prev => (prev === newTab ? prev : newTab));
 
-    const prevTab = activeTab;
-    setActiveTab(newTab);
-
-    // Cross-fade on native compositor thread with zero frame drops
-    Animated.parallel([
-      Animated.timing(tabOpacities[prevTab], {
-        toValue: 0,
-        duration: 150,
+    // Immediate tactile feedback on the tapped tab button
+    Animated.sequence([
+      Animated.timing(tabScales[newTab], {
+        toValue: 0.88,
+        duration: 50,
         useNativeDriver: true,
       }),
-      Animated.timing(tabOpacities[newTab], {
+      Animated.spring(tabScales[newTab], {
         toValue: 1,
-        duration: 150,
+        friction: 5,
+        tension: 180,
         useNativeDriver: true,
       }),
     ]).start();
-  };
+  }, [tabScales]);
 
   // Initialize notifications on app launch and schedule background checks for recommended papers
   useEffect(() => {
@@ -138,81 +142,74 @@ export const AppNavigator: React.FC = () => {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      {/* Screen Body with Individual Native-Driven 60fps Tab Layers */}
-      <View style={styles.screenContainer}>
+      {/* Screen Body with Individual Tab Layers */}
+      <View style={[styles.screenContainer, { backgroundColor: colors.background }]}>
         {loadedTabs.discover && (
-          <Animated.View
+          <View
             style={[
               styles.tabLayer,
-              {
-                opacity: tabOpacities.discover,
-                zIndex: activeTab === 'discover' ? 2 : 1,
-              },
+              activeTab === 'discover' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
             ]}
             pointerEvents={activeTab === 'discover' ? 'auto' : 'none'}
           >
-            <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
-          </Animated.View>
+            <MemoDiscoverScreen onSelectPaper={handleSelectPaper} />
+          </View>
         )}
 
         {loadedTabs.library && (
-          <Animated.View
+          <View
             style={[
               styles.tabLayer,
-              {
-                opacity: tabOpacities.library,
-                zIndex: activeTab === 'library' ? 2 : 1,
-              },
+              activeTab === 'library' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
             ]}
             pointerEvents={activeTab === 'library' ? 'auto' : 'none'}
           >
-            <LibraryScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
-          </Animated.View>
+            <MemoLibraryScreen
+              isActive={activeTab === 'library'}
+              onSelectPaper={handleSelectPaper}
+            />
+          </View>
         )}
 
         {loadedTabs.foryou && (
-          <Animated.View
+          <View
             style={[
               styles.tabLayer,
-              {
-                opacity: tabOpacities.foryou,
-                zIndex: activeTab === 'foryou' ? 2 : 1,
-              },
+              activeTab === 'foryou' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
             ]}
             pointerEvents={activeTab === 'foryou' ? 'auto' : 'none'}
           >
-            <ForYouScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
-          </Animated.View>
+            <MemoForYouScreen onSelectPaper={handleSelectPaper} />
+          </View>
         )}
 
         {loadedTabs.community && (
-          <Animated.View
+          <View
             style={[
               styles.tabLayer,
-              {
-                opacity: tabOpacities.community,
-                zIndex: activeTab === 'community' ? 2 : 1,
-              },
+              activeTab === 'community' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
             ]}
             pointerEvents={activeTab === 'community' ? 'auto' : 'none'}
           >
-            <CommunityScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
-          </Animated.View>
+            <MemoCommunityScreen onSelectPaper={handleSelectPaper} />
+          </View>
         )}
 
         {loadedTabs.settings && (
-          <Animated.View
+          <View
             style={[
               styles.tabLayer,
-              {
-                opacity: tabOpacities.settings,
-                zIndex: activeTab === 'settings' ? 2 : 1,
-              },
+              activeTab === 'settings' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
             ]}
             pointerEvents={activeTab === 'settings' ? 'auto' : 'none'}
           >
-            <SettingsScreen />
-          </Animated.View>
+            <MemoSettingsScreen />
+          </View>
         )}
       </View>
 
@@ -233,15 +230,18 @@ export const AppNavigator: React.FC = () => {
           { tab: 'settings', label: 'Settings', Icon: Settings },
         ].map(({ tab, label, Icon }) => {
           const isActive = activeTab === tab;
+          const scale = tabScales[tab as TabName];
           return (
             <TouchableOpacity
               key={tab}
               style={styles.navTab}
               onPress={() => handleTabChange(tab as TabName)}
               activeOpacity={0.7}
+              delayPressIn={0}
             >
-              <View style={[
+              <Animated.View style={[
                 styles.iconContainer,
+                { transform: [{ scale }] },
                 isActive && {
                   backgroundColor: theme === 'dark' ? '#1E3A8A' : '#DBEAFE',
                 }
@@ -251,7 +251,7 @@ export const AppNavigator: React.FC = () => {
                   color={isActive ? colors.primary : colors.textMuted}
                   strokeWidth={isActive ? 2.4 : 1.9}
                 />
-              </View>
+              </Animated.View>
               <Text
                 style={[
                   styles.navLabel,
@@ -304,6 +304,7 @@ const styles = StyleSheet.create({
   },
   tabLayer: {
     ...StyleSheet.absoluteFill,
+    overflow: 'hidden',
   },
   activeTabLayer: {
     display: 'flex',

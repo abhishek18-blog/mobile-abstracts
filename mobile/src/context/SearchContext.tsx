@@ -215,6 +215,15 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             updated_at: new Date().toISOString(),
           }));
 
+          // De-duplicate any papers with identical IDs
+          const uniqueConvertedMap = new Map<string, Paper>();
+          converted.forEach((p) => {
+            if (p && p.id && !uniqueConvertedMap.has(p.id)) {
+              uniqueConvertedMap.set(p.id, p);
+            }
+          });
+          converted = Array.from(uniqueConvertedMap.values());
+
           if (sort === 'most_cited') {
             converted.sort((a, b) => (b.citations || 0) - (a.citations || 0));
           } else if (sort === 'most_recent') {
@@ -232,9 +241,15 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           // ── Persist fresh results for offline use ──
           saveSearchToStorage(trimmed, sort, converted, totalRes);
         } else {
-          // If live search returned no data, check local offline matches
+          // If live search returned no data, check local offline matches (strictly deduplicated by ID)
           const { MOCK_PAPERS, paperCache } = await import('../services/api');
-          const allAvailable = Array.from(new Set([...Array.from(paperCache.values()), ...MOCK_PAPERS]));
+          const dedupedMap = new Map<string, Paper>();
+          [...Array.from(paperCache.values()), ...MOCK_PAPERS].forEach((p) => {
+            if (p && p.id && !dedupedMap.has(p.id)) {
+              dedupedMap.set(p.id, p);
+            }
+          });
+          const allAvailable = Array.from(dedupedMap.values());
           const qLower = trimmed.toLowerCase();
           const offlineMatches = allAvailable.filter(
             (p) =>
@@ -257,9 +272,15 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     } catch (err: any) {
       console.warn('[SearchContext] Background search error:', err);
-      // Try searching offline papers (from cachePapers / MOCK_PAPERS / persistent storage)
+      // Try searching offline papers (strictly deduplicated by ID)
       const { MOCK_PAPERS, paperCache } = await import('../services/api');
-      const allAvailable = Array.from(new Set([...Array.from(paperCache.values()), ...MOCK_PAPERS]));
+      const dedupedMap = new Map<string, Paper>();
+      [...Array.from(paperCache.values()), ...MOCK_PAPERS].forEach((p) => {
+        if (p && p.id && !dedupedMap.has(p.id)) {
+          dedupedMap.set(p.id, p);
+        }
+      });
+      const allAvailable = Array.from(dedupedMap.values());
       const qLower = trimmed.toLowerCase();
       const offlineMatches = allAvailable.filter(
         (p) =>
@@ -317,9 +338,17 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setHasMore(false);
         } else {
           setPapers((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const newUnique = fresh.filter((p) => !existingIds.has(p.id));
-            const combined = [...prev, ...newUnique];
+            const map = new Map<string, Paper>();
+            prev.forEach((p) => {
+              if (p && p.id) map.set(p.id, p);
+            });
+            fresh.forEach((p) => {
+              if (p && p.id && !map.has(p.id)) {
+                map.set(p.id, p);
+              }
+            });
+            const combined = Array.from(map.values());
+            const newCount = combined.length - prev.length;
 
             if (selectedSort === 'most_cited') {
               combined.sort((a, b) => (b.citations || 0) - (a.citations || 0));
@@ -329,7 +358,7 @@ export const SearchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             cachePapers(combined);
             const totalRes = (res as any).total || (combined.length >= 10 ? combined.length + 50 : combined.length);
-            setHasMore(combined.length < totalRes && newUnique.length > 0);
+            setHasMore(combined.length < totalRes && newCount > 0);
             return combined;
           });
           setOffset(nextOffset);

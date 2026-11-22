@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Folder, Bookmark, Plus, BookMarked, X, ArrowLeft, Trash2, WifiOff, ChevronRight } from 'lucide-react-native';
 import { Paper, Project } from '../types';
-import { papersApi, projectsApi, cachePapers } from '../services/api';
+import { papersApi, projectsApi, cachePapers, MOCK_PAPERS } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
 import { BooksIllustration } from '../components/HeaderIllustrations';
 import { useTheme } from '../context/ThemeContext';
@@ -33,8 +33,14 @@ async function saveProjectsToStorage(projects: Project[]) {
 async function loadPapersFromStorage(): Promise<Paper[]> {
   try {
     const raw = await AsyncStorage.getItem(SAVED_PAPERS_CACHE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    return MOCK_PAPERS.filter((p) => p.saved);
+  } catch {
+    return MOCK_PAPERS.filter((p) => p.saved);
+  }
 }
 async function loadProjectsFromStorage(): Promise<Project[]> {
   try {
@@ -43,8 +49,15 @@ async function loadProjectsFromStorage(): Promise<Project[]> {
   } catch { return []; }
 }
 
+let inMemorySavedPapers: Paper[] = MOCK_PAPERS.filter((p) => p.saved);
+let inMemoryProjects: Project[] = [];
+
+loadPapersFromStorage().then(p => { if (p && p.length > 0) inMemorySavedPapers = p; }).catch(() => {});
+loadProjectsFromStorage().then(p => { if (p && p.length > 0) inMemoryProjects = p; }).catch(() => {});
+
 interface LibraryScreenProps {
   onSelectPaper: (paperId: string) => void;
+  isActive?: boolean;
 }
 
 const PROJECT_COLORS = [
@@ -56,12 +69,12 @@ const PROJECT_COLORS = [
   '#ec4899', // pink
 ];
 
-export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) => {
+export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper, isActive }) => {
   const { colors, theme } = useTheme();
   const [activeSegment, setActiveSegment] = useState<'saved' | 'projects'>('saved');
-  const [savedPapers, setSavedPapers] = useState<Paper[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [savedPapers, setSavedPapers] = useState<Paper[]>(inMemorySavedPapers);
+  const [projects, setProjects] = useState<Project[]>(inMemoryProjects);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
 
@@ -82,27 +95,42 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
         // ── Show cached instantly ──
         const cachedPapers = await loadPapersFromStorage();
         if (cachedPapers.length > 0) {
+          inMemorySavedPapers = cachedPapers;
           setSavedPapers(cachedPapers);
           cachePapers(cachedPapers);
-          setLoading(false);
         }
-        // ── Fetch fresh from network ──
+        // ── Fetch fresh from network or storage in background ──
         const res = await papersApi.getAll({ saved_by: 'true' });
         if (res.success && res.data) {
-          setSavedPapers(res.data);
-          cachePapers(res.data);
-          savePapersToStorage(res.data); // persist for offline
+          const serverPapers = res.data;
+          const mergedMap = new Map<string, Paper>();
+          serverPapers.forEach((p) => {
+            if (p && p.id) mergedMap.set(p.id, { ...p, saved: true });
+          });
+          cachedPapers.forEach((p) => {
+            if (p && p.id && !mergedMap.has(p.id)) {
+              mergedMap.set(p.id, { ...p, saved: true });
+            }
+          });
+          const merged = Array.from(mergedMap.values());
+          inMemorySavedPapers = merged;
+          setSavedPapers(merged);
+          cachePapers(merged);
+          savePapersToStorage(merged); // persist for offline
+        } else if (cachedPapers.length > 0) {
+          setSavedPapers(cachedPapers);
         }
       } else {
         // ── Show cached instantly ──
         const cachedProjects = await loadProjectsFromStorage();
         if (cachedProjects.length > 0) {
+          inMemoryProjects = cachedProjects;
           setProjects(cachedProjects);
-          setLoading(false);
         }
-        // ── Fetch fresh from network ──
+        // ── Fetch fresh from network in background ──
         const res = await projectsApi.getAll();
         if (res.success && res.data) {
+          inMemoryProjects = res.data;
           setProjects(res.data);
           saveProjectsToStorage(res.data); // persist for offline
         }
@@ -111,13 +139,19 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       console.warn('Failed to fetch library (offline fallback active):', err);
       setIsOffline(true);
       // Fallback: load from storage if network fails and nothing displayed yet
-      if (activeSegment === 'saved' && savedPapers.length === 0) {
+      if (activeSegment === 'saved') {
         const cached = await loadPapersFromStorage();
-        setSavedPapers(cached);
-        cachePapers(cached);
-      } else if (activeSegment === 'projects' && projects.length === 0) {
+        if (cached.length > 0) {
+          inMemorySavedPapers = cached;
+          setSavedPapers(cached);
+          cachePapers(cached);
+        }
+      } else if (activeSegment === 'projects') {
         const cached = await loadProjectsFromStorage();
-        setProjects(cached);
+        if (cached.length > 0) {
+          inMemoryProjects = cached;
+          setProjects(cached);
+        }
       }
     } finally {
       setLoading(false);
@@ -126,13 +160,21 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
   };
 
   useEffect(() => {
-    setLoading(true);
     setSelectedProject(null); // Reset detail view when switching segments
     loadLibraryData();
   }, [activeSegment]);
 
+  // Refresh data whenever user navigates back to Library tab
+  useEffect(() => {
+    if (isActive) {
+      loadLibraryData();
+    }
+  }, [isActive]);
+
   const handleSelectProject = async (project: Project) => {
-    setLoading(true);
+    // Optimistically open project details view immediately for smooth navigation
+    setSelectedProject(project);
+    setProjectPapers((project.papers || []) as Paper[]);
     try {
       const res = await projectsApi.getById(project.id);
       if (res.success && res.data) {
@@ -141,8 +183,6 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       }
     } catch (err) {
       console.warn('Failed to load project details:', err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -340,7 +380,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       ) : activeSegment === 'saved' ? (
         <FlatList<Paper>
           data={savedPapers}
-          keyExtractor={(item: Paper) => item.id}
+          keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `saved-${index}`)}
           renderItem={({ item }: { item: Paper }) => (
             <PaperCard 
               paper={item} 
@@ -375,7 +415,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       ) : selectedProject ? (
         <FlatList<Paper>
           data={projectPapers}
-          keyExtractor={(item: Paper) => item.id}
+          keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `proj-paper-${index}`)}
           ListHeaderComponent={
             <View style={styles.projectHeaderDetails}>
               <TouchableOpacity
@@ -466,7 +506,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       ) : (
         <FlatList<Project>
           data={projects}
-          keyExtractor={(item: Project) => item.id}
+          keyExtractor={(item: Project, index: number) => (item?.id ? `${item.id}-${index}` : `proj-${index}`)}
           renderItem={({ item }: { item: Project }) => (
             <TouchableOpacity 
               activeOpacity={0.8}

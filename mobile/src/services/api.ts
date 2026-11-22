@@ -289,7 +289,8 @@ async function request<T>(
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
+  // 15-second timeout to allow sleeping cloud backends (Render free tier) and mobile networks to respond
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
 
   try {
     const response = await fetch(url, {
@@ -400,19 +401,60 @@ export const papersApi = {
     if (query.saved_by) params.append('saved_by', query.saved_by);
 
     const queryString = params.toString() ? `?${params.toString()}` : '';
+    const isSavedQuery = query.tag === 'saved' || query.saved_by === 'true';
+
     try {
+      const token = await AsyncStorage.getItem('token');
+      // If user is guest/unauthenticated and asking for saved papers,
+      // load directly from local storage so backend (which has no user_id) doesn't return empty []
+      if (isSavedQuery && !token) {
+        const localSavedRaw = await AsyncStorage.getItem(OFFLINE_SAVED_PAPERS_KEY);
+        const localSaved: Paper[] = localSavedRaw ? JSON.parse(localSavedRaw) : [];
+        if (localSaved.length > 0) {
+          cachePapers(localSaved);
+          return { success: true, data: localSaved };
+        }
+        // Fallback to MOCK_PAPERS that have saved: true
+        const mockSaved = MOCK_PAPERS.filter((p) => p.saved);
+        return { success: true, data: mockSaved };
+      }
+
       const res = await request<Paper[]>(`/papers${queryString}`);
       if (res.success && res.data) {
         cachePapers(res.data);
-        if (query.tag === 'saved' || query.saved_by === 'true') {
-          AsyncStorage.setItem(OFFLINE_SAVED_PAPERS_KEY, JSON.stringify(res.data)).catch(() => {});
+        if (isSavedQuery) {
+          // Merge server papers with local offline saved papers so offline/external saves are never lost
+          const localSavedRaw = await AsyncStorage.getItem(OFFLINE_SAVED_PAPERS_KEY);
+          const localSaved: Paper[] = localSavedRaw ? JSON.parse(localSavedRaw) : [];
+          const mergedMap = new Map<string, Paper>();
+          // Server saved papers first
+          res.data.forEach((p) => {
+            if (p && p.id) mergedMap.set(p.id, { ...p, saved: true });
+          });
+          // Local saved papers next (if not already present)
+          localSaved.forEach((p) => {
+            if (p && p.id && !mergedMap.has(p.id)) {
+              mergedMap.set(p.id, { ...p, saved: true });
+            }
+          });
+          // If first run on a fresh APK install and both server and local storage are empty,
+          // seed with starter saved papers so the user library is populated
+          if (mergedMap.size === 0) {
+            const mockSaved = MOCK_PAPERS.filter((p) => p.saved);
+            mockSaved.forEach((p) => {
+              if (p && p.id) mergedMap.set(p.id, { ...p, saved: true });
+            });
+          }
+          const merged = Array.from(mergedMap.values());
+          await AsyncStorage.setItem(OFFLINE_SAVED_PAPERS_KEY, JSON.stringify(merged)).catch(() => {});
+          return { success: true, data: merged };
         }
       }
       return res;
     } catch {
       // Fallback for guest mode / unauthenticated / offline
       let filtered = [...MOCK_PAPERS];
-      if (query.tag === 'saved' || query.saved_by === 'true') {
+      if (isSavedQuery) {
         try {
           const savedRaw = await AsyncStorage.getItem(OFFLINE_SAVED_PAPERS_KEY);
           if (savedRaw) {
@@ -477,36 +519,89 @@ export const papersApi = {
     return { success: false, error: 'Paper not found.' };
   },
 
-  toggleSave: async (id: string) => {
+  toggleSave: async (id: string, paperObj?: Paper) => {
+    // 1. Resolve paper object from parameter, cache, or mock papers
+    let targetPaper = paperObj || paperCache.get(id) || MOCK_PAPERS.find(x => x.id === id);
+    if (targetPaper) {
+      if (!targetPaper.abstract || targetPaper.abstract.trim().length < 10) {
+        targetPaper.abstract = getAbstractText(targetPaper);
+      }
+      paperCache.set(id, targetPaper);
+    }
+
     let newSavedState = false;
+    const token = await AsyncStorage.getItem('token');
+
+    // 2. Read current saved list from storage
+    let savedList: Paper[] = [];
     try {
-      const res = await request<{ saved: boolean }>(`/papers/${id}/save`, { method: 'POST' });
-      newSavedState = res.data?.saved ?? false;
-      const p = paperCache.get(id);
-      if (p) p.saved = newSavedState;
-    } catch {
-      const p = MOCK_PAPERS.find(x => x.id === id) || paperCache.get(id);
-      if (p) {
-        p.saved = !p.saved;
-        newSavedState = p.saved;
-      } else {
-        newSavedState = true;
+      const savedRaw = await AsyncStorage.getItem(OFFLINE_SAVED_PAPERS_KEY);
+      if (savedRaw) savedList = JSON.parse(savedRaw);
+    } catch {}
+
+    const currentlySavedLocally = savedList.some(p => p.id === id);
+    newSavedState = targetPaper ? !targetPaper.saved : !currentlySavedLocally;
+
+    // 3. If authenticated, try syncing with backend
+    if (token) {
+      try {
+        const serverRes = await request<{ saved: boolean }>(`/papers/${id}/save`, { method: 'POST' });
+        if (serverRes.success && serverRes.data) {
+          newSavedState = serverRes.data.saved;
+        }
+      } catch (err: any) {
+        // If external paper not in database and we want to save it, import it first
+        if (targetPaper && newSavedState) {
+          try {
+            const importRes = await fetch(`${currentApiUrl}/search/papers/import`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                title: targetPaper.title,
+                authors: targetPaper.authors,
+                year: targetPaper.year,
+                citations: targetPaper.citations,
+                abstract: targetPaper.abstract,
+                url: targetPaper.source_url,
+                pdfUrl: targetPaper.pdf_url,
+                externalId: targetPaper.id,
+              }),
+            });
+            const importJson = await importRes.json();
+            const realId = importJson.data?.id || importJson.data?._id;
+            if (realId) {
+              await request<{ saved: boolean }>(`/papers/${realId}/save`, { method: 'POST' });
+              paperCache.set(realId, { ...targetPaper, id: realId, saved: true });
+            }
+          } catch (importErr) {
+            console.warn('[toggleSave] External paper import failed, retaining local save:', importErr);
+          }
+        }
       }
     }
 
-    // Keep OFFLINE_SAVED_PAPERS_KEY in sync
+    // 4. Update memory cache and mock papers
+    if (targetPaper) {
+      targetPaper.saved = newSavedState;
+    }
+    const mockP = MOCK_PAPERS.find(x => x.id === id);
+    if (mockP) {
+      mockP.saved = newSavedState;
+    }
+
+    // 5. Update local storage list
     try {
-      const savedRaw = await AsyncStorage.getItem(OFFLINE_SAVED_PAPERS_KEY);
-      let list: Paper[] = savedRaw ? JSON.parse(savedRaw) : [];
       if (newSavedState) {
-        const paperToSave = paperCache.get(id) || MOCK_PAPERS.find(x => x.id === id);
-        if (paperToSave && !list.some(p => p.id === id)) {
-          list.unshift({ ...paperToSave, saved: true });
+        if (targetPaper && !savedList.some(p => p.id === id)) {
+          savedList.unshift({ ...targetPaper, saved: true });
         }
       } else {
-        list = list.filter(p => p.id !== id);
+        savedList = savedList.filter(p => p.id !== id);
       }
-      await AsyncStorage.setItem(OFFLINE_SAVED_PAPERS_KEY, JSON.stringify(list));
+      await AsyncStorage.setItem(OFFLINE_SAVED_PAPERS_KEY, JSON.stringify(savedList));
     } catch {}
 
     return { success: true, data: { saved: newSavedState } };

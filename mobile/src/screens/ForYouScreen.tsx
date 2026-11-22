@@ -158,7 +158,8 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
 
   const handleToggleSave = async (paperId: string) => {
     try {
-      const res = await papersApi.toggleSave(paperId);
+      const paperObj = papers.find(p => p.id === paperId);
+      const res = await papersApi.toggleSave(paperId, paperObj);
       if (res.success && res.data) {
         setPapers((prev) =>
           prev.map((p) => (p.id === paperId ? { ...p, saved: res.data?.saved } : p))
@@ -382,7 +383,7 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
       ) : (
         <FlatList<Paper>
           data={papers}
-          keyExtractor={(item: Paper) => item.id}
+          keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `rec-${index}`)}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
