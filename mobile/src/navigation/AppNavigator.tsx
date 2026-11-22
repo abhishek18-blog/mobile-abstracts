@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Animated } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, Bookmark, Compass, Users, Settings } from 'lucide-react-native';
@@ -22,7 +22,7 @@ type TabName = 'discover' | 'library' | 'foryou' | 'community' | 'settings';
 
 export const AppNavigator: React.FC = () => {
   const { token, isGuest, isLoading, enterGuestMode } = useAuth();
-  const { hasSelected, loading: interestsLoading } = useInterests();
+  const { interests, hasSelected, loading: interestsLoading } = useInterests();
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabName>('discover');
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
@@ -31,10 +31,70 @@ export const AppNavigator: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { theme, colors } = useTheme();
 
-  // Initialize notifications on app launch
+  // Lazy load tab instances so screens only mount when first visited
+  const [loadedTabs, setLoadedTabs] = useState<Record<TabName, boolean>>({
+    discover: true,
+    library: false,
+    foryou: false,
+    community: false,
+    settings: false,
+  });
+
+  // Native-driven 60fps opacities for seamless cross-fades without Yoga layout recalculation
+  const tabOpacities = useRef({
+    discover: new Animated.Value(1),
+    library: new Animated.Value(0),
+    foryou: new Animated.Value(0),
+    community: new Animated.Value(0),
+    settings: new Animated.Value(0),
+  }).current;
+
+  const handleTabChange = (newTab: TabName) => {
+    if (newTab === activeTab) return;
+
+    // Ensure target tab is mounted
+    if (!loadedTabs[newTab]) {
+      setLoadedTabs(prev => ({ ...prev, [newTab]: true }));
+    }
+
+    const prevTab = activeTab;
+    setActiveTab(newTab);
+
+    // Cross-fade on native compositor thread with zero frame drops
+    Animated.parallel([
+      Animated.timing(tabOpacities[prevTab], {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+      Animated.timing(tabOpacities[newTab], {
+        toValue: 1,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  // Initialize notifications on app launch and schedule background checks for recommended papers
   useEffect(() => {
     notificationService.initialize();
-  }, []);
+
+    if (interests && interests.length > 0) {
+      // Check after a brief delay so initial load is smooth
+      const initialTimer = setTimeout(() => {
+        notificationService.checkAndNotifyNewRecommendedPapers(interests);
+      }, 3000);
+
+      const interval = setInterval(() => {
+        notificationService.checkAndNotifyNewRecommendedPapers(interests);
+      }, 60000);
+
+      return () => {
+        clearTimeout(initialTimer);
+        clearInterval(interval);
+      };
+    }
+  }, [interests]);
 
   // Initial Splash Screen with Abstracts SVG Logo and Creative Animated Spinner
   if (showSplash || isLoading || interestsLoading) {
@@ -75,36 +135,94 @@ export const AppNavigator: React.FC = () => {
     return <OnboardingScreen />;
   }
 
-  const renderActiveScreen = () => {
-    switch (activeTab) {
-      case 'discover':
-        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'library':
-        return <LibraryScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'foryou':
-        return <ForYouScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'community':
-        return <CommunityScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'settings':
-        return <SettingsScreen />;
-      default:
-        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-    }
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      {/* Screen Body */}
-      <View style={styles.screenContainer}>{renderActiveScreen()}</View>
+      {/* Screen Body with Individual Native-Driven 60fps Tab Layers */}
+      <View style={styles.screenContainer}>
+        {loadedTabs.discover && (
+          <Animated.View
+            style={[
+              styles.tabLayer,
+              {
+                opacity: tabOpacities.discover,
+                zIndex: activeTab === 'discover' ? 2 : 1,
+              },
+            ]}
+            pointerEvents={activeTab === 'discover' ? 'auto' : 'none'}
+          >
+            <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
+          </Animated.View>
+        )}
+
+        {loadedTabs.library && (
+          <Animated.View
+            style={[
+              styles.tabLayer,
+              {
+                opacity: tabOpacities.library,
+                zIndex: activeTab === 'library' ? 2 : 1,
+              },
+            ]}
+            pointerEvents={activeTab === 'library' ? 'auto' : 'none'}
+          >
+            <LibraryScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
+          </Animated.View>
+        )}
+
+        {loadedTabs.foryou && (
+          <Animated.View
+            style={[
+              styles.tabLayer,
+              {
+                opacity: tabOpacities.foryou,
+                zIndex: activeTab === 'foryou' ? 2 : 1,
+              },
+            ]}
+            pointerEvents={activeTab === 'foryou' ? 'auto' : 'none'}
+          >
+            <ForYouScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
+          </Animated.View>
+        )}
+
+        {loadedTabs.community && (
+          <Animated.View
+            style={[
+              styles.tabLayer,
+              {
+                opacity: tabOpacities.community,
+                zIndex: activeTab === 'community' ? 2 : 1,
+              },
+            ]}
+            pointerEvents={activeTab === 'community' ? 'auto' : 'none'}
+          >
+            <CommunityScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />
+          </Animated.View>
+        )}
+
+        {loadedTabs.settings && (
+          <Animated.View
+            style={[
+              styles.tabLayer,
+              {
+                opacity: tabOpacities.settings,
+                zIndex: activeTab === 'settings' ? 2 : 1,
+              },
+            ]}
+            pointerEvents={activeTab === 'settings' ? 'auto' : 'none'}
+          >
+            <SettingsScreen />
+          </Animated.View>
+        )}
+      </View>
 
       {/* Bottom Navigation Bar */}
       <View style={[
         styles.bottomNav,
         {
-          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
           backgroundColor: colors.card,
-          borderTopColor: colors.border
+          borderTopColor: theme === 'dark' ? colors.border : '#EEF2F6',
         }
       ]}>
         {[
@@ -119,17 +237,19 @@ export const AppNavigator: React.FC = () => {
             <TouchableOpacity
               key={tab}
               style={styles.navTab}
-              onPress={() => setActiveTab(tab as TabName)}
+              onPress={() => handleTabChange(tab as TabName)}
               activeOpacity={0.7}
             >
               <View style={[
                 styles.iconContainer,
-                isActive && { backgroundColor: colors.primary + '20' }
+                isActive && {
+                  backgroundColor: theme === 'dark' ? '#1E3A8A' : '#DBEAFE',
+                }
               ]}>
                 <Icon
                   size={20}
                   color={isActive ? colors.primary : colors.textMuted}
-                  strokeWidth={isActive ? 2.4 : 1.8}
+                  strokeWidth={isActive ? 2.4 : 1.9}
                 />
               </View>
               <Text
@@ -150,6 +270,8 @@ export const AppNavigator: React.FC = () => {
       <Modal
         visible={!!selectedPaperId}
         animationType="slide"
+        hardwareAccelerated={true}
+        statusBarTranslucent={true}
         onRequestClose={() => setSelectedPaperId(null)}
       >
         <PaperDetailModalScreen
@@ -164,53 +286,64 @@ export const AppNavigator: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#EAF2FB',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#EAF2FB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#94a3b8',
+    color: '#64748B',
     fontSize: 16,
     fontWeight: '600',
   },
   screenContainer: {
     flex: 1,
   },
+  tabLayer: {
+    ...StyleSheet.absoluteFill,
+  },
+  activeTabLayer: {
+    display: 'flex',
+    zIndex: 1,
+  },
+  hiddenTabLayer: {
+    display: 'none',
+    zIndex: 0,
+  },
   bottomNav: {
     flexDirection: 'row',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderColor: '#334155',
-    paddingTop: 10,
+    borderColor: '#EEF2F6',
+    paddingTop: 4,
     paddingHorizontal: 6,
     justifyContent: 'space-around',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 4,
   },
   navTab: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
-    minWidth: 60,
+    paddingVertical: 1,
+    minWidth: 54,
   },
   iconContainer: {
-    paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 3,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   navLabel: {
-    color: '#64748b',
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.1,
-  },
-  navLabelActive: {
-    color: '#38bdf8',
-    fontWeight: '700',
   },
 });

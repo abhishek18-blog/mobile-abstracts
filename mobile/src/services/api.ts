@@ -265,9 +265,13 @@ AsyncStorage.getItem(OFFLINE_COMMUNITIES_KEY).then((raw) => {
 
 export const persistLocalCommunities = async (comms: Community[]) => {
   try {
-    const valid = (comms || []).filter(c => c && c.id && !c.id.startsWith('comm-'));
-    localCommunities = valid;
-    await AsyncStorage.setItem(OFFLINE_COMMUNITIES_KEY, JSON.stringify(valid));
+    const valid = (comms || []).filter(c => c && (c.id || (c as any)._id));
+    localCommunities = valid.map(c => ({
+      ...c,
+      id: String(c.id || (c as any)._id),
+      posts: c.posts || [],
+    }));
+    await AsyncStorage.setItem(OFFLINE_COMMUNITIES_KEY, JSON.stringify(localCommunities));
   } catch {}
 };
 
@@ -952,6 +956,21 @@ export const projectsApi = {
     }
   },
 
+  delete: async (id: string): Promise<ApiResponse<any>> => {
+    try {
+      const res = await request<any>(`/projects/${id}`, {
+        method: 'DELETE',
+      });
+      localProjects = localProjects.filter(p => p.id !== id);
+      persistLocalProjects(localProjects);
+      return res;
+    } catch {
+      localProjects = localProjects.filter(p => p.id !== id);
+      persistLocalProjects(localProjects);
+      return { success: true, data: null, message: 'Project deleted' };
+    }
+  },
+
   addPaper: async (projectId: string, paperId: string): Promise<ApiResponse<any>> => {
     try {
       return await request<any>(`/projects/${projectId}/papers`, {
@@ -1101,24 +1120,34 @@ export const communityApi = {
 
   create: async (data: { name: string; description?: string; subject: string; icon?: string }): Promise<ApiResponse<Community>> => {
     try {
-      const res = await request<Community>('/community', {
+      const res = await request<any>('/community', {
         method: 'POST',
         body: JSON.stringify(data),
       });
       if (res.success && res.data) {
-        localCommunities.unshift(res.data);
+        const normalized: Community = {
+          ...res.data,
+          id: String(res.data.id || res.data._id || `comm-${Date.now()}`),
+          posts: res.data.posts || [],
+          isMember: true,
+          isAdmin: true,
+          memberCount: res.data.memberCount || 1,
+        };
+        localCommunities.unshift(normalized);
         persistLocalCommunities(localCommunities);
+        return { success: true, data: normalized };
       }
       return res;
     } catch {
       const newComm: Community = {
-        id: `comm-${Date.now()}`,
+        id: `local-comm-${Date.now()}`,
         name: data.name,
         description: data.description || '',
         subject: data.subject,
         icon: data.icon || '🔬',
         memberCount: 1,
         isMember: true,
+        isAdmin: true,
         posts: [],
       };
       localCommunities.unshift(newComm);
@@ -1129,17 +1158,22 @@ export const communityApi = {
 
   createPost: async (communityId: string, data: { content: string; paper_ids?: string[] }): Promise<ApiResponse<CommunityPost>> => {
     try {
-      const res = await request<CommunityPost>(`/community/${communityId}/posts`, {
+      const res = await request<any>(`/community/${communityId}/posts`, {
         method: 'POST',
         body: JSON.stringify(data),
       });
       if (res.success && res.data) {
+        const normalizedPost: CommunityPost = {
+          ...res.data,
+          id: String(res.data.id || res.data._id || `post-${Date.now()}`),
+        };
         const comm = localCommunities.find(c => c.id === communityId);
         if (comm) {
           comm.posts = comm.posts || [];
-          comm.posts.unshift(res.data);
+          comm.posts.unshift(normalizedPost);
           persistLocalCommunities(localCommunities);
         }
+        return { success: true, data: normalizedPost };
       }
       return res;
     } catch {
@@ -1155,7 +1189,7 @@ export const communityApi = {
       };
       if (comm) {
         comm.posts = comm.posts || [];
-        comm.posts.unshift(newPost);
+        comm.posts.push(newPost);
         persistLocalCommunities(localCommunities);
       }
       return { success: true, data: newPost };

@@ -12,6 +12,7 @@ interface ThemeContextType {
     text: string;
     textMuted: string;
     primary: string;
+    primaryLight: string;
     border: string;
     statusBar: string;
   };
@@ -20,12 +21,15 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setTheme] = useState<ThemeMode>('dark');
+  // Default to 'light' to match the beautiful reference UI
+  const [theme, setTheme] = useState<ThemeMode>('light');
 
   useEffect(() => {
     const loadTheme = async () => {
       const stored = await AsyncStorage.getItem('themeMode');
-      if (stored === 'light') {
+      if (stored === 'dark') {
+        setTheme('dark');
+      } else if (stored === 'light') {
         setTheme('light');
       }
     };
@@ -40,21 +44,23 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const colors = theme === 'dark' 
     ? {
-        background: '#000000', // pure black
-        card: '#121212', // dark gray card
-        text: '#ffffff', // white text
-        textMuted: '#a3a3a3', // neutral gray muted text
-        primary: '#ffffff', // black & white style primary accent
-        border: '#262626', // sharp dark border
+        background: '#0B0F19', // Deep clean dark canvas
+        card: '#161F30', // Elevated dark card with distinct tone
+        text: '#F8FAFC', // Crisp white high-contrast text
+        textMuted: '#94A3B8', // Clear readable muted text
+        primary: '#3B82F6', // Vibrant readable blue accent
+        primaryLight: '#1E3A8A', // Soft dark blue container
+        border: '#24324D', // Distinct readable border
         statusBar: 'light',
       }
     : {
-        background: '#ffffff', // pure white background
-        card: '#ffffff', // pure white card
-        text: '#111111', // solid black text
-        textMuted: '#6b7280', // neutral gray muted text
-        primary: '#0066cc', // true royal blue primary accent
-        border: '#e5e7eb', // soft gray border
+        background: '#EAF2FB', // Soft airy light blue tint matching reference UI
+        card: '#FFFFFF', // Pure crisp white cards
+        text: '#0F172A', // Deep dark slate
+        textMuted: '#64748B', // Elegant slate muted
+        primary: '#1363F5', // Vibrant royal blue from screenshots
+        primaryLight: '#EFF6FF', // Soft ice-blue pill tint
+        border: '#E2E8F0', // Crisp subtle border
         statusBar: 'dark',
       };
 

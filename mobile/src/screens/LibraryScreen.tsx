@@ -17,6 +17,7 @@ import { Folder, Bookmark, Plus, BookMarked, X, ArrowLeft, Trash2, WifiOff, Chev
 import { Paper, Project } from '../types';
 import { papersApi, projectsApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
+import { BooksIllustration } from '../components/HeaderIllustrations';
 import { useTheme } from '../context/ThemeContext';
 
 // ─── Offline Cache Keys ──────────────────────────────────────────────────────
@@ -223,6 +224,35 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
     }
   };
 
+  const handleDeleteProject = (project: Project) => {
+    Alert.alert(
+      'Delete Project',
+      `Are you sure you want to delete "${project.name}"? All associations in this project will be removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const res = await projectsApi.delete(project.id);
+              if (res.success) {
+                setProjects(prev => prev.filter(p => p.id !== project.id));
+                if (selectedProject?.id === project.id) {
+                  setSelectedProject(null);
+                }
+              } else {
+                Alert.alert('Error', res.error || 'Failed to delete project.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete project.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
 
   return (
@@ -230,13 +260,14 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <Text style={[styles.title, { color: colors.text }]}>My Library</Text>
-          {activeSegment === 'projects' && !selectedProject && (
+          {!selectedProject && (
             <TouchableOpacity 
               style={[styles.createBtn, { backgroundColor: colors.primary }]}
               onPress={() => setIsModalOpen(true)}
+              activeOpacity={0.8}
             >
-              <Plus size={16} color={primaryBtnTextColor} />
-              <Text style={[styles.createBtnText, { color: primaryBtnTextColor }]}>New Project</Text>
+              <Plus size={15} color="#FFFFFF" strokeWidth={2.4} />
+              <Text style={styles.createBtnText}>New Project</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -251,25 +282,50 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
           </View>
         )}
         
-        {/* Segment Control - only show if not viewing project details */}
+        {/* Segment Control matching 2.png */}
         {!selectedProject && (
-          <View style={[styles.segmentContainer, { backgroundColor: colors.card }]}>
+          <View style={styles.segmentContainer}>
             <TouchableOpacity
-              style={[styles.segmentBtn, activeSegment === 'saved' && { backgroundColor: colors.primary }]}
+              style={[
+                styles.segmentBtn,
+                activeSegment === 'saved'
+                  ? styles.segmentBtnActive
+                  : [styles.segmentBtnInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+              ]}
               onPress={() => setActiveSegment('saved')}
+              activeOpacity={0.8}
             >
-              <Bookmark size={16} color={activeSegment === 'saved' ? primaryBtnTextColor : colors.textMuted} />
-              <Text style={[styles.segmentText, { color: colors.textMuted }, activeSegment === 'saved' && { color: primaryBtnTextColor, fontWeight: '700' }]}>
+              <Bookmark
+                size={16}
+                color={activeSegment === 'saved' ? '#FFFFFF' : colors.text}
+                fill={activeSegment === 'saved' ? '#FFFFFF' : 'transparent'}
+              />
+              <Text style={[
+                styles.segmentText,
+                activeSegment === 'saved' ? styles.segmentTextActive : [styles.segmentTextInactive, { color: colors.text }]
+              ]}>
                 Saved Papers
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.segmentBtn, activeSegment === 'projects' && { backgroundColor: colors.primary }]}
+              style={[
+                styles.segmentBtn,
+                activeSegment === 'projects'
+                  ? styles.segmentBtnActive
+                  : [styles.segmentBtnInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+              ]}
               onPress={() => setActiveSegment('projects')}
+              activeOpacity={0.8}
             >
-              <Folder size={16} color={activeSegment === 'projects' ? primaryBtnTextColor : colors.textMuted} />
-              <Text style={[styles.segmentText, { color: colors.textMuted }, activeSegment === 'projects' && { color: primaryBtnTextColor, fontWeight: '700' }]}>
+              <Folder
+                size={16}
+                color={activeSegment === 'projects' ? '#FFFFFF' : colors.text}
+              />
+              <Text style={[
+                styles.segmentText,
+                activeSegment === 'projects' ? styles.segmentTextActive : [styles.segmentTextInactive, { color: colors.text }]
+              ]}>
                 Projects
               </Text>
             </TouchableOpacity>
@@ -322,14 +378,36 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
           keyExtractor={(item: Paper) => item.id}
           ListHeaderComponent={
             <View style={styles.projectHeaderDetails}>
-              <TouchableOpacity style={styles.backBtn} onPress={handleCloseProjectDetails}>
-                <ArrowLeft size={16} color={colors.primary} />
+              <TouchableOpacity
+                style={[
+                  styles.backBtn,
+                  {
+                    backgroundColor: theme === 'dark' ? '#161F30' : '#EFF6FF',
+                    borderColor: theme === 'dark' ? colors.border : '#DBEAFE',
+                  }
+                ]}
+                onPress={handleCloseProjectDetails}
+                activeOpacity={0.7}
+              >
+                <ArrowLeft size={16} color={colors.primary} strokeWidth={2.4} />
                 <Text style={[styles.backBtnText, { color: colors.primary }]}>Back to Projects</Text>
               </TouchableOpacity>
               
               <View style={[styles.projectDetailBanner, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={[styles.colorIndicatorLarge, { backgroundColor: selectedProject.color || '#3b82f6' }]} />
-                <Text style={[styles.projectDetailName, { color: colors.text }]}>{selectedProject.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <Text style={[styles.projectDetailName, { color: colors.text, flex: 1, marginRight: 8 }]}>
+                    {selectedProject.name}
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteProject(selectedProject)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    style={[styles.projectTrashBtn, { backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2' }]}
+                    activeOpacity={0.7}
+                  >
+                    <Trash2 size={15} color="#EF4444" strokeWidth={2} />
+                  </TouchableOpacity>
+                </View>
                 {selectedProject.description ? (
                   <Text style={[styles.projectDetailDesc, { color: colors.textMuted }]}>{selectedProject.description}</Text>
                 ) : null}
@@ -347,24 +425,15 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
             </View>
           }
           renderItem={({ item }: { item: Paper }) => (
-            <View style={{ marginBottom: 12 }}>
-              <PaperCard 
-                paper={item} 
-                onPress={() => {
-                  cachePapers([item]);
-                  onSelectPaper(item.id);
-                }} 
-                onToggleSave={() => handleToggleSave(item.id)}
-              />
-              <TouchableOpacity
-                style={[styles.removePaperBtnInline, { borderColor: colors.border, backgroundColor: colors.card }]}
-                activeOpacity={0.7}
-                onPress={() => handleRemovePaperFromProject(item.id)}
-              >
-                <Trash2 size={12} color="#ef4444" />
-                <Text style={styles.removePaperTextInline}>Remove from Project</Text>
-              </TouchableOpacity>
-            </View>
+            <PaperCard 
+              paper={item} 
+              onPress={() => {
+                cachePapers([item]);
+                onSelectPaper(item.id);
+              }} 
+              onToggleSave={() => handleToggleSave(item.id)}
+              onRemove={() => handleRemovePaperFromProject(item.id)}
+            />
           )}
           contentContainerStyle={styles.listContent}
           refreshControl={
@@ -408,7 +477,20 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectPaper }) =
               <View style={styles.projectMain}>
                 <View style={styles.projectNameRow}>
                   <Text style={[styles.projectName, { color: colors.text }]} numberOfLines={1}>{item.name}</Text>
-                  <ChevronRight size={16} color={colors.textMuted} />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDeleteProject(item);
+                      }}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      style={[styles.projectTrashBtn, { backgroundColor: theme === 'dark' ? 'rgba(239, 68, 68, 0.15)' : '#FEE2E2' }]}
+                      activeOpacity={0.7}
+                    >
+                      <Trash2 size={14} color="#EF4444" strokeWidth={2} />
+                    </TouchableOpacity>
+                    <ChevronRight size={16} color={colors.textMuted} />
+                  </View>
                 </View>
                 {item.description ? (
                   <Text style={[styles.projectDesc, { color: colors.textMuted }]} numberOfLines={2}>
@@ -522,11 +604,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -542,33 +619,48 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     flex: 1,
   },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 4,
+    minHeight: 44,
   },
   title: {
     fontSize: 24,
     fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 28,
+  },
+  subtitle: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 1,
   },
   createBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
     borderRadius: 8,
+    alignSelf: 'center',
   },
   createBtnText: {
     color: '#ffffff',
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: '700',
     marginLeft: 4,
   },
   segmentContainer: {
     flexDirection: 'row',
-    borderRadius: 12,
-    padding: 4,
+    gap: 12,
+    marginTop: 4,
+    marginBottom: 8,
   },
   segmentBtn: {
     flex: 1,
@@ -576,15 +668,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
+    paddingHorizontal: 16,
     borderRadius: 8,
+    borderWidth: 1,
+    gap: 8,
+  },
+  segmentBtnActive: {
+    backgroundColor: '#1363F5',
+    borderColor: '#1363F5',
+    shadowColor: '#1363F5',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  segmentBtnInactive: {
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
   },
   segmentText: {
     fontSize: 14,
     fontWeight: '600',
-    marginLeft: 6,
+  },
+  segmentTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  segmentTextInactive: {
+    color: '#64748B',
+    fontWeight: '600',
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   center: {
     flex: 1,
@@ -592,12 +712,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   projectCard: {
+    marginHorizontal: 16,
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     flexDirection: 'row',
     borderWidth: 1,
     alignItems: 'center',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   colorIndicator: {
     width: 6,
@@ -612,6 +738,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  projectTrashBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   projectName: {
     fontSize: 16,
@@ -730,15 +863,21 @@ const styles = StyleSheet.create({
   },
   // Project detail styling
   projectHeaderDetails: {
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    marginBottom: 14,
   },
   backBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+    marginBottom: 14,
   },
   backBtnText: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '700',
     marginLeft: 6,
   },

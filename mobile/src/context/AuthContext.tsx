@@ -71,6 +71,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await AsyncStorage.setItem('token', newToken);
     await AsyncStorage.setItem('user_profile', JSON.stringify(newUser));
     await AsyncStorage.removeItem('isGuest');
+
+    // Immediately cache interests so AppNavigator never re-prompts an existing user
+    if (newUser.hasSelectedInterests || (newUser.interests && newUser.interests.length > 0)) {
+      await AsyncStorage.setItem('user_interests_selected', 'true');
+      if (newUser.interests && newUser.interests.length > 0) {
+        await AsyncStorage.setItem('user_interests', JSON.stringify(newUser.interests));
+      }
+    }
+
     setToken(newToken);
     setUser(newUser);
     setIsGuest(false);

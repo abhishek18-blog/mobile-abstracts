@@ -12,11 +12,13 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogOut, Moon, Sun, Layers, Plus, X, Camera, Trash2, Image as ImageIcon, Check, UserCheck } from 'lucide-react-native';
+import { LogOut, Moon, Sun, Layers, Plus, X, Camera, Trash2, Image as ImageIcon, Check, UserCheck, Bell, Smartphone, Sparkles, Info } from 'lucide-react-native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
 import { userApi } from '../services/api';
+import { notificationService, NotificationPrefs } from '../services/notificationService';
+import Constants from 'expo-constants';
 
 const AVAILABLE_INTERESTS = [
   'Machine Learning',
@@ -68,6 +70,26 @@ export const SettingsScreen: React.FC = () => {
       setSelectedInterests(interests);
     }
   }, [interests]);
+
+  // Notification preferences state
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>({
+    paperAlerts: true,
+    communityAlerts: true,
+  });
+
+  useEffect(() => {
+    notificationService.getPrefs().then(setNotificationPrefs);
+  }, []);
+
+  const handleTogglePref = async (key: keyof NotificationPrefs) => {
+    const updated = await notificationService.savePrefs({ [key]: !notificationPrefs[key] });
+    setNotificationPrefs(updated);
+  };
+
+  const handleSendTestNotification = async () => {
+    await notificationService.sendTestNotification();
+    Alert.alert('🔔 Notification Triggered', 'A test alert has been delivered to your device notifications tray.');
+  };
 
   // Custom Topic input modal state
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
@@ -322,7 +344,7 @@ export const SettingsScreen: React.FC = () => {
             <Text style={[styles.cardTitle, { color: colors.text }]}>App Appearance</Text>
           </View>
           <Text style={[styles.fieldSub, { color: colors.textMuted }]}>
-            Switch between professional Light and deep Black background themes:
+            Switch between professional Light and Dark background themes:
           </Text>
           <View style={styles.themeToggleRow}>
             <TouchableOpacity
@@ -346,7 +368,7 @@ export const SettingsScreen: React.FC = () => {
               onPress={() => theme !== 'dark' && toggleTheme()}
             >
               <Moon size={16} color={theme === 'dark' ? primaryBtnTextColor : colors.textMuted} />
-              <Text style={[styles.themeBtnText, { color: theme === 'dark' ? primaryBtnTextColor : colors.text }]}>Black Mode</Text>
+              <Text style={[styles.themeBtnText, { color: theme === 'dark' ? primaryBtnTextColor : colors.text }]}>Dark Mode</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -361,7 +383,7 @@ export const SettingsScreen: React.FC = () => {
             {isRoleSaved && (
               <View style={{ backgroundColor: '#22c55e20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
                 <Check size={12} color="#22c55e" style={{ marginRight: 4 }} />
-                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved! ✓</Text>
+                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved</Text>
               </View>
             )}
           </View>
@@ -404,7 +426,7 @@ export const SettingsScreen: React.FC = () => {
             {isInterestsSaved && (
               <View style={{ backgroundColor: '#22c55e20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, flexDirection: 'row', alignItems: 'center' }}>
                 <Check size={12} color="#22c55e" style={{ marginRight: 4 }} />
-                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved! ✓</Text>
+                <Text style={{ color: '#22c55e', fontSize: 12, fontWeight: '700' }}>Saved</Text>
               </View>
             )}
           </View>
@@ -464,7 +486,7 @@ export const SettingsScreen: React.FC = () => {
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
                 <Check size={18} color="#ffffff" style={{ marginRight: 6 }} />
                 <Text style={[styles.saveBtnText, { color: '#ffffff', fontWeight: '800' }]}>
-                  Saved! ✓
+                  Saved
                 </Text>
               </View>
             ) : (
@@ -475,6 +497,63 @@ export const SettingsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
+        {/* Notifications & Push Alerts Card */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.cardHeader}>
+            <Bell size={18} color="#3b82f6" />
+            <Text style={[styles.cardTitle, { color: colors.text }]}>Notifications & Device Alerts</Text>
+          </View>
+          <Text style={[styles.fieldSub, { color: colors.textMuted }]}>
+            Receive notifications directly on your installed app for new research and community messages:
+          </Text>
+
+          {/* Toggle 1: Recommended Research Alerts */}
+          <TouchableOpacity
+            style={[styles.prefToggleRow, { borderBottomColor: colors.border + '50' }]}
+            onPress={() => handleTogglePref('paperAlerts')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={[styles.prefTitle, { color: colors.text }]}>Recommended Paper Alerts</Text>
+              <Text style={[styles.prefSub, { color: colors.textMuted }]}>
+                "A new research from..." alerts when new papers match your interests
+              </Text>
+            </View>
+            <View style={[styles.switchTrack, notificationPrefs.paperAlerts ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]}>
+              <View style={[styles.switchThumb, notificationPrefs.paperAlerts ? styles.switchThumbActive : styles.switchThumbInactive]} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Toggle 2: Community Messages */}
+          <TouchableOpacity
+            style={[styles.prefToggleRow, { borderBottomColor: colors.border + '50' }]}
+            onPress={() => handleTogglePref('communityAlerts')}
+            activeOpacity={0.7}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text style={[styles.prefTitle, { color: colors.text }]}>Community Message Alerts</Text>
+              <Text style={[styles.prefSub, { color: colors.textMuted }]}>
+                Instant notifications when researchers post in joined groups
+              </Text>
+            </View>
+            <View style={[styles.switchTrack, notificationPrefs.communityAlerts ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]}>
+              <View style={[styles.switchThumb, notificationPrefs.communityAlerts ? styles.switchThumbActive : styles.switchThumbInactive]} />
+            </View>
+          </TouchableOpacity>
+
+          {/* Test Notification Button */}
+          <TouchableOpacity
+            style={[styles.testNotifyBtn, { backgroundColor: colors.primary + '15', borderColor: colors.primary + '35' }]}
+            onPress={handleSendTestNotification}
+            activeOpacity={0.75}
+          >
+            <Bell size={15} color={colors.primary} />
+            <Text style={[styles.testNotifyBtnText, { color: colors.primary }]}>
+              Send Test Notification to Device
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         {/* Logout */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <LogOut size={18} color="#ef4444" />
@@ -482,6 +561,13 @@ export const SettingsScreen: React.FC = () => {
             {isGuest ? 'Exit Guest Mode' : 'Log Out'}
           </Text>
         </TouchableOpacity>
+
+        {/* Minimal Version 2.0.0 */}
+        <View style={styles.versionContainer}>
+          <Text style={[styles.versionText, { color: colors.textMuted }]}>
+            Version 2.0.0
+          </Text>
+        </View>
       </ScrollView>
 
       {/* Custom Interest Input Modal */}
@@ -620,6 +706,68 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+    paddingBottom: 16,
+    flexGrow: 1,
+  },
+  prefToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  prefTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  prefSub: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  switchTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  switchThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ffffff',
+  },
+  switchThumbActive: {
+    alignSelf: 'flex-end',
+  },
+  switchThumbInactive: {
+    alignSelf: 'flex-start',
+  },
+  testNotifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 12,
+    gap: 6,
+  },
+  testNotifyBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  versionContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    marginBottom: 20,
+  },
+  versionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   card: {
     borderRadius: 14,
@@ -759,8 +907,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#7f1d1d',
-    marginTop: 10,
-    marginBottom: 30,
+    marginTop: 14,
+    marginBottom: 4,
   },
   logoutText: {
     color: '#fca5a5',

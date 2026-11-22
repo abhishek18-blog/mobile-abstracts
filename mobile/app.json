@@ -3,7 +3,7 @@
     "name": "Abstracts Mobile",
     "slug": "abstracts-mobile",
     "scheme": "abstractsmobile",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": [
@@ -12,6 +12,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.abstracts.researchhub",
+      "buildNumber": "2",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "This app requires access to your photo library so you can set your profile picture."
@@ -20,6 +21,7 @@
     "icon": "./logo/icon.png",
     "android": {
       "package": "com.abstracts.researchhub",
+      "versionCode": 2,
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
@@ -29,6 +31,7 @@
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.POST_NOTIFICATIONS",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_IMAGES",
@@ -36,6 +39,14 @@
       ]
     },
     "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./logo/icon.png",
+          "color": "#3b82f6",
+          "defaultChannel": "recommended-research"
+        }
+      ],
       [
         "expo-image-picker",
         {

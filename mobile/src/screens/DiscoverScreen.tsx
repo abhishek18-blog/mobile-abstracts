@@ -29,10 +29,13 @@ import {
   User,
   AlertCircle,
   WifiOff,
+  Star,
+  Clock,
 } from 'lucide-react-native';
 import { Paper, ExternalPaper, Project } from '../types';
 import { papersApi, searchApi, projectsApi, cachePapers, getAbstractText } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
+import { BooksIllustration } from '../components/HeaderIllustrations';
 import { useTheme } from '../context/ThemeContext';
 import { useSearch } from '../context/SearchContext';
 
@@ -209,11 +212,18 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
       <View style={styles.headerContainer}>
         <View style={styles.headerTitleRow}>
           <Text style={[styles.headerTitle, { color: colors.text }]}>Discover Research</Text>
+          <BooksIllustration size={64} />
         </View>
 
-        {/* Search Bar */}
-        <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Search size={18} color={colors.textMuted} />
+        {/* Search Bar matching 1.png */}
+        <View style={[
+          styles.searchBox,
+          {
+            backgroundColor: colors.card,
+            borderColor: theme === 'dark' ? colors.border : '#E2E8F0',
+          }
+        ]}>
+          <Search size={19} color={colors.textMuted} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
             placeholder="Search titles, authors, topics..."
@@ -233,77 +243,93 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({ onSelectPaper })
           </View>
         )}
 
-        {/* View Mode Toggle & Filters */}
+        {/* View Mode Toggle & Filters matching 1.png */}
         <View style={styles.controlsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginRight: 8 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1, marginRight: 8 }} contentContainerStyle={{ alignItems: 'center' }}>
+            {/* Most Cited Chip */}
             <TouchableOpacity
               style={[
                 styles.filterChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-                selectedSort === 'most_cited' && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
+                selectedSort === 'most_cited'
+                  ? styles.filterChipActive
+                  : [styles.filterChipInactive, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]
               ]}
               onPress={() => setSelectedSort('most_cited')}
+              activeOpacity={0.8}
             >
+              <Star
+                size={14}
+                color={selectedSort === 'most_cited' ? '#FFFFFF' : colors.text}
+                fill={selectedSort === 'most_cited' ? '#FFFFFF' : 'transparent'}
+              />
               <Text style={[
                 styles.filterChipText,
-                { color: colors.textMuted },
-                selectedSort === 'most_cited' && { color: colors.primary, fontWeight: '700' }
+                selectedSort === 'most_cited' ? styles.filterChipTextActive : [styles.filterChipTextInactive, { color: colors.text }]
               ]}>
                 Most Cited
               </Text>
             </TouchableOpacity>
 
+            {/* Most Recent Chip */}
             <TouchableOpacity
               style={[
                 styles.filterChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-                selectedSort === 'most_recent' && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
+                selectedSort === 'most_recent'
+                  ? styles.filterChipActive
+                  : [styles.filterChipInactive, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]
               ]}
               onPress={() => setSelectedSort('most_recent')}
+              activeOpacity={0.8}
             >
+              <Clock
+                size={14}
+                color={selectedSort === 'most_recent' ? '#FFFFFF' : colors.text}
+              />
               <Text style={[
                 styles.filterChipText,
-                { color: colors.textMuted },
-                selectedSort === 'most_recent' && { color: colors.primary, fontWeight: '700' }
+                selectedSort === 'most_recent' ? styles.filterChipTextActive : [styles.filterChipTextInactive, { color: colors.text }]
               ]}>
                 Most Recent
               </Text>
             </TouchableOpacity>
 
+            {/* Filter Chip */}
             <TouchableOpacity
               style={[
                 styles.filterChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-                activeFilterCount > 0 && { backgroundColor: colors.primary + '20', borderColor: colors.primary }
+                activeFilterCount > 0
+                  ? styles.filterChipActive
+                  : [styles.filterChipInactive, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]
               ]}
               onPress={() => setShowFilterModal(true)}
+              activeOpacity={0.8}
             >
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Filter size={13} color={activeFilterCount > 0 ? colors.primary : colors.textMuted} />
-                <Text style={[
-                  styles.filterChipText,
-                  { color: colors.textMuted, marginLeft: 4 },
-                  activeFilterCount > 0 && { color: colors.primary, fontWeight: '700' }
-                ]}>
-                  Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
-                </Text>
-              </View>
+              <Filter
+                size={14}
+                color={activeFilterCount > 0 ? '#FFFFFF' : colors.text}
+              />
+              <Text style={[
+                styles.filterChipText,
+                activeFilterCount > 0 ? styles.filterChipTextActive : [styles.filterChipTextInactive, { color: colors.text }]
+              ]}>
+                Filter {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}
+              </Text>
             </TouchableOpacity>
           </ScrollView>
 
           {/* View Mode Icons */}
-          <View style={[styles.toggleWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.toggleWrapper, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]}>
             <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'list' && { backgroundColor: colors.background }]}
+              style={[styles.toggleBtn, viewMode === 'list' && { backgroundColor: theme === 'dark' ? '#24324D' : '#EFF6FF' }]}
               onPress={() => setViewMode('list')}
             >
-              <LayoutList size={16} color={viewMode === 'list' ? colors.primary : colors.textMuted} />
+              <LayoutList size={16} color={viewMode === 'list' ? (theme === 'dark' ? '#60A5FA' : '#1363F5') : colors.textMuted} />
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'swipe' && { backgroundColor: colors.background }]}
+              style={[styles.toggleBtn, viewMode === 'swipe' && { backgroundColor: theme === 'dark' ? '#24324D' : '#EFF6FF' }]}
               onPress={() => setViewMode('swipe')}
             >
-              <BookCopy size={16} color={viewMode === 'swipe' ? colors.primary : colors.textMuted} />
+              <BookCopy size={16} color={viewMode === 'swipe' ? (theme === 'dark' ? '#60A5FA' : '#1363F5') : colors.textMuted} />
             </TouchableOpacity>
           </View>
         </View>
@@ -756,36 +782,49 @@ const styles = StyleSheet.create({
   },
   headerContainer: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 4,
+    minHeight: 44,
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 28,
+  },
+  headerSubtitle: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 1,
   },
   searchBox: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
-    marginBottom: 12,
+    marginBottom: 8,
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
     borderWidth: 1,
-    marginBottom: 8,
+    marginBottom: 10,
     gap: 6,
   },
   offlineBannerText: {
@@ -795,8 +834,9 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
-    fontSize: 14,
+    marginLeft: 10,
+    fontSize: 15,
+    fontWeight: '500',
     paddingVertical: 0,
   },
   controlsRow: {
@@ -805,14 +845,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 22,
     borderWidth: 1,
     marginRight: 8,
   },
+  filterChipActive: {
+    backgroundColor: '#1363F5',
+    borderColor: '#1363F5',
+    shadowColor: '#1363F5',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  filterChipInactive: {
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
   filterChipText: {
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  filterChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  filterChipTextInactive: {
+    color: '#64748B',
     fontWeight: '600',
   },
   activeFiltersRow: {
@@ -845,17 +912,18 @@ const styles = StyleSheet.create({
   },
   toggleWrapper: {
     flexDirection: 'row',
-    borderRadius: 8,
-    padding: 2,
+    borderRadius: 16,
+    padding: 3,
     borderWidth: 1,
   },
   toggleBtn: {
-    padding: 6,
-    borderRadius: 6,
+    padding: 7,
+    borderRadius: 12,
   },
   listContent: {
-    padding: 16,
-    paddingTop: 4,
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   centerContainer: {
     flex: 1,
