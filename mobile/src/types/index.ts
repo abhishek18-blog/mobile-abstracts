@@ -103,6 +103,7 @@ export interface CommunityPost {
   author?: { name: string; avatar_initials: string; avatar_url?: string; role: string };
   created_at: string;
   isE2EE?: boolean;
+  status?: 'sending' | 'sent' | 'failed';
 }
 
 export type ApiResponse<T> =

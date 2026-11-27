@@ -10,23 +10,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Image,
-  Modal,
   Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 import {
   LogIn,
   UserPlus,
   ArrowLeft,
-  X,
-  Check,
-  ShieldCheck,
   Eye,
   EyeOff,
   Mail,
   User,
-  UserCheck,
 } from 'lucide-react-native';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 
@@ -94,21 +89,27 @@ const fetchAuthWithFallback = async (endpoint: string, options: RequestInit): Pr
   throw lastError || new Error('Unable to connect to any API backend server. Please check your internet connection.');
 };
 
-// Preset authorized Google accounts for seamless 1-tap testing
-const GOOGLE_ACCOUNTS = [
-  {
-    name: 'Abhishek Deshmukh',
-    email: 'abhishek.des674@gmail.com',
-    avatar: 'A',
-    note: 'Primary Account',
-  },
-  {
-    name: 'Research Scholar',
-    email: 'student.research@gmail.com',
-    avatar: 'S',
-    note: 'Student Profile',
-  },
-];
+// Google 4-Color 'G' Logo (Inline SVG, 100% reliable offline)
+const GoogleIcon: React.FC<{ size?: number }> = ({ size = 20 }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" style={{ marginRight: 10 }}>
+    <Path
+      fill="#4285F4"
+      d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.66v3.05h3.88c2.27-2.09 3.66-5.18 3.66-9.15z"
+    />
+    <Path
+      fill="#34A853"
+      d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"
+    />
+    <Path
+      fill="#FBBC05"
+      d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"
+    />
+    <Path
+      fill="#EA4335"
+      d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"
+    />
+  </Svg>
+);
 
 interface AuthScreenProps {
   onBack?: () => void;
@@ -126,11 +127,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Google Sign-In state & Modal
+  // Google Sign-In state
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [selectedGoogleAccountIndex, setSelectedGoogleAccountIndex] = useState<number | null>(0);
-  const [customGoogleEmail, setCustomGoogleEmail] = useState('');
 
   // Initialize Native Google Sign-In with official Web Client ID
   useEffect(() => {
@@ -208,7 +206,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
       const json = await response.json();
 
       if (response.ok && json.success && json.token && json.user) {
-        setShowGoogleModal(false);
         await login(json.token, json.user);
         return;
       }
@@ -227,22 +224,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
     }
   };
 
-  // Trigger Google Sign-In: Opens Google Account Chooser immediately for 100% reliable login
-  const handleGoogleSignIn = () => {
-    setShowGoogleModal(true);
-  };
-
-  // Device Native Google Sign-In with full DEVELOPER_ERROR resilience & guidance
-  const handleNativeDeviceSignIn = async () => {
-    const isExpoGo =
-      Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
-      (Constants as any).appOwnership === 'expo' ||
-      !GoogleSignin?.signIn;
-
-    if (isExpoGo || !GoogleSignin?.signIn) {
+  // Direct native Google Sign-In with device account picker
+  const handleGoogleSignIn = async () => {
+    if (!GoogleSignin?.signIn) {
       Alert.alert(
-        'Device Notice',
-        'Device Google Account Picker is only supported in native builds. Please select your Google account from the options above to sign in directly.'
+        'Google Sign-In Unavailable',
+        'Google Sign-In is only available in standalone builds.'
       );
       return;
     }
@@ -269,7 +256,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
 
       if (targetEmail) {
         await executeGoogleLogin(targetEmail, targetName, targetAvatar);
-        return;
+      } else {
+        throw new Error('No email found for this Google account.');
       }
     } catch (err: any) {
       console.warn('Native Google Sign-In error:', err);
@@ -277,36 +265,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
         setGoogleLoading(false);
         return;
       }
-
-      const msg = err?.message || String(err || '');
-      const isDevError = msg.includes('DEVELOPER_ERROR') || err?.code === '10';
-
-      if (isDevError) {
-        Alert.alert(
-          'Firebase SHA-1 Required For Native Picker',
-          'Native Google Play Services requires your APK SHA-1 fingerprint (5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25) to be registered in Firebase Console.\n\nIn the meantime, you can sign in instantly by tapping your account above!',
-          [{ text: 'Got It', onPress: () => {} }]
-        );
-      } else {
-        Alert.alert(
-          'Google Account Picker Notice',
-          msg || 'Unable to open native account picker. Please choose your Google account from the options above.'
-        );
-      }
+      Alert.alert(
+        'Google Sign-In Error',
+        err?.message || 'Unable to complete Google Sign-In. Please try again.'
+      );
     } finally {
       setGoogleLoading(false);
-    }
-  };
-
-  // Confirm selection from Google Modal
-  const handleModalGoogleSubmit = async () => {
-    if (customGoogleEmail.trim()) {
-      await executeGoogleLogin(customGoogleEmail.trim());
-    } else if (selectedGoogleAccountIndex !== null && GOOGLE_ACCOUNTS[selectedGoogleAccountIndex]) {
-      const selectedAcc = GOOGLE_ACCOUNTS[selectedGoogleAccountIndex];
-      await executeGoogleLogin(selectedAcc.email, selectedAcc.name);
-    } else {
-      Alert.alert('Selection Required', 'Please select a Google account or enter your email address.');
     }
   };
 
@@ -582,53 +546,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
                 <ActivityIndicator color="#2563eb" />
               ) : (
                 <>
-                  <Image
-                    source={{ uri: 'https://www.google.com/favicon.ico' }}
-                    style={styles.googleIcon}
-                  />
+                  <GoogleIcon size={20} />
                   <Text style={styles.googleBtnText}>Continue with Google</Text>
                 </>
               )}
             </TouchableOpacity>
-
-            {/* Requirement 3: "dont have a account? SignIn or SignUp" */}
-            <View style={styles.switchBox}>
-              <Text style={[styles.switchPrompt, { color: colors.textMuted }]}>
-                {isRegister ? 'Already have an account? ' : "Don't have an account? "}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setIsRegister(!isRegister)}
-                activeOpacity={0.7}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              >
-                <Text style={styles.switchActionLink}>
-                  {isRegister ? 'Sign In' : 'Sign Up'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Quick Dual Switcher Pill: "SignIn or SignUp" */}
-            <View style={styles.dualSwitchRow}>
-              <TouchableOpacity
-                style={[styles.dualPill, !isRegister && styles.dualPillActive]}
-                onPress={() => setIsRegister(false)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.dualPillText, !isRegister ? styles.dualPillTextActive : { color: colors.textMuted }]}>
-                  SignIn
-                </Text>
-              </TouchableOpacity>
-              <Text style={[styles.dualOrText, { color: colors.textMuted }]}>or</Text>
-              <TouchableOpacity
-                style={[styles.dualPill, isRegister && styles.dualPillActive]}
-                onPress={() => setIsRegister(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.dualPillText, isRegister ? styles.dualPillTextActive : { color: colors.textMuted }]}>
-                  SignUp
-                </Text>
-              </TouchableOpacity>
-            </View>
           </View>
 
           {/* Guest Access Option */}
@@ -637,149 +559,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onBack }) => {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      {/* Google Account Chooser Modal (Reliable 1-tap Google Login in all environments) */}
-      <Modal
-        visible={showGoogleModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowGoogleModal(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View style={[styles.modalContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {/* Header */}
-            <View style={styles.modalHeader}>
-              <View style={styles.modalHeaderTitleRow}>
-                <Image
-                  source={{ uri: 'https://www.google.com/favicon.ico' }}
-                  style={{ width: 22, height: 22, marginRight: 10 }}
-                />
-                <Text style={[styles.modalTitle, { color: colors.text }]}>
-                  Google Account Sign In
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowGoogleModal(false)}
-                style={styles.closeBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <X size={20} color={colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={[styles.modalSubtitle, { color: colors.textMuted }]}>
-              Select an account to sign in directly to <Text style={{ fontWeight: '700', color: '#2563eb' }}>Abstracts</Text>:
-            </Text>
-
-            {/* Account Selection List */}
-            <View style={styles.accountsList}>
-              {GOOGLE_ACCOUNTS.map((acc, index) => {
-                const isSelected = selectedGoogleAccountIndex === index && !customGoogleEmail;
-                return (
-                  <TouchableOpacity
-                    key={acc.email}
-                    style={[
-                      styles.accountCard,
-                      {
-                        backgroundColor: theme === 'dark' ? '#1e293b' : '#f8fafc',
-                        borderColor: isSelected ? '#2563eb' : colors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelectedGoogleAccountIndex(index);
-                      setCustomGoogleEmail('');
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.accountAvatar}>
-                      <Text style={styles.accountAvatarText}>{acc.avatar}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.accountName, { color: colors.text }]}>
-                        {acc.name}
-                      </Text>
-                      <Text style={[styles.accountEmail, { color: colors.textMuted }]}>
-                        {acc.email}
-                      </Text>
-                      <Text style={styles.accountNote}>{acc.note}</Text>
-                    </View>
-                    {isSelected && (
-                      <View style={styles.checkBadge}>
-                        <Check size={14} color="#ffffff" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Custom Google Email Input */}
-            <View style={styles.customEmailBox}>
-              <Text style={[styles.customEmailLabel, { color: colors.textMuted }]}>
-                OR ENTER ANY GOOGLE EMAIL
-              </Text>
-              <View
-                style={[
-                  styles.customInputWrapper,
-                  {
-                    backgroundColor: theme === 'dark' ? '#1e293b' : '#f8fafc',
-                    borderColor: customGoogleEmail ? '#2563eb' : colors.border,
-                  },
-                ]}
-              >
-                <Mail size={18} color={colors.textMuted} style={{ marginRight: 10 }} />
-                <TextInput
-                  style={[styles.customInput, { color: colors.text }]}
-                  placeholder="e.g. yourname@gmail.com"
-                  placeholderTextColor={colors.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={customGoogleEmail}
-                  onChangeText={(val) => {
-                    setCustomGoogleEmail(val);
-                    if (val) setSelectedGoogleAccountIndex(null);
-                  }}
-                />
-              </View>
-            </View>
-
-            {/* Confirm Google Sign-In Button */}
-            <TouchableOpacity
-              style={styles.confirmGoogleBtn}
-              onPress={handleModalGoogleSubmit}
-              disabled={googleLoading}
-              activeOpacity={0.85}
-            >
-              {googleLoading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <>
-                  <UserCheck size={18} color="#ffffff" style={{ marginRight: 8 }} />
-                  <Text style={styles.confirmGoogleBtnText}>
-                    Sign In with {customGoogleEmail.trim() ? customGoogleEmail.trim().split('@')[0] : 'Selected Google Account'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            {/* Optional Device Native Google Account Picker */}
-            <TouchableOpacity
-              style={[styles.devicePickerBtn, { borderColor: colors.border }]}
-              onPress={handleNativeDeviceSignIn}
-              disabled={googleLoading}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.devicePickerText, { color: colors.textMuted }]}>
-                Or pick another Google account from device
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 };
@@ -963,65 +742,11 @@ const styles = StyleSheet.create({
     elevation: 2,
     gap: 10,
   },
-  googleIcon: {
-    width: 18,
-    height: 18,
-  },
   googleBtnText: {
     fontSize: 13.5,
     fontWeight: '700',
     color: '#1f2937',
     letterSpacing: 0.2,
-  },
-
-  /* Switch text */
-  switchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 18,
-    flexWrap: 'wrap',
-  },
-  switchPrompt: {
-    fontSize: 13.5,
-    fontWeight: '500',
-  },
-  switchActionLink: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#2563eb',
-  },
-
-  /* Dual Switcher Pill Row */
-  dualSwitchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    gap: 8,
-  },
-  dualPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 5,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  dualPillActive: {
-    backgroundColor: 'rgba(37, 99, 235, 0.12)',
-    borderColor: '#2563eb',
-  },
-  dualPillText: {
-    fontSize: 12.5,
-    fontWeight: '700',
-  },
-  dualPillTextActive: {
-    color: '#2563eb',
-    fontWeight: '800',
-  },
-  dualOrText: {
-    fontSize: 12,
-    fontWeight: '500',
   },
 
   /* Guest Button */
@@ -1034,139 +759,5 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '500',
     textDecorationLine: 'underline',
-  },
-
-  /* Google Modal Styles */
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderWidth: 1,
-    padding: 24,
-    paddingBottom: 36,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  modalHeaderTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  closeBtn: {
-    padding: 4,
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    marginBottom: 16,
-  },
-  accountsList: {
-    gap: 10,
-    marginBottom: 16,
-  },
-  accountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1.5,
-  },
-  accountAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2563eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  accountAvatarText: {
-    color: '#ffffff',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  accountName: {
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  accountEmail: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  accountNote: {
-    fontSize: 10,
-    color: '#2563eb',
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  checkBadge: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#2563eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  customEmailBox: {
-    marginBottom: 16,
-  },
-  customEmailLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  customInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  customInput: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  confirmGoogleBtn: {
-    backgroundColor: '#2563eb',
-    borderRadius: 16,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#2563eb',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  confirmGoogleBtnText: {
-    color: '#ffffff',
-    fontSize: 13.5,
-    fontWeight: '800',
-  },
-  devicePickerBtn: {
-    marginTop: 12,
-    paddingVertical: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  devicePickerText: {
-    fontSize: 12.5,
-    fontWeight: '600',
   },
 });
