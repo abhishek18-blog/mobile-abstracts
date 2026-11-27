@@ -210,10 +210,14 @@ export const getCommunityById = async (req, res) => {
 
     const enrichedPosts = postsRaw.map(post => {
       const author = post.user_id;
+      const authorId = author && typeof author === 'object' ? String(author._id || author.id) : (post.user_id ? String(post.user_id) : undefined);
       const papers = post.paper_ids || [];
       return {
         ...post.toJSON(),
-        author: author ? { name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role } : null,
+        user_id: authorId,
+        author: author && typeof author === 'object'
+          ? { id: authorId, name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role }
+          : null,
         papers: papers.map(paper => paper ? { id: paper._id, title: paper.title, authors: paper.authors, year: paper.year, citations: paper.citations } : null).filter(Boolean),
       };
     });
@@ -551,7 +555,7 @@ export const createPost = async (req, res) => {
       ...post.toJSON(),
       id: post._id,
       _id: post._id,
-      author: author ? { name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role } : null,
+      author: author ? { id: String(author._id), name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role } : null,
       papers: papers.map(paper => paper ? {
         id: paper._id,
         _id: paper._id,

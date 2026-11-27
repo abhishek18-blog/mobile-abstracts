@@ -56,6 +56,7 @@ import { CommunitiesIllustration } from '../components/HeaderIllustrations';
 const OFFLINE_COMMUNITIES_KEY = 'offline_communities';
 const OFFLINE_COMMUNITY_DETAIL_PREFIX = 'offline_community_detail_';
 const SEEN_COMMUNITY_POSTS_KEY = 'seen_community_posts_ids';
+const HIDDEN_COMMUNITY_POSTS_KEY_PREFIX = 'hidden_community_posts_';
 
 interface CommunityScreenProps {
   onSelectPaper?: (paperId: string) => void;
@@ -144,7 +145,7 @@ interface MessageBubbleProps {
   colors: any;
   primaryBtnTextColor: string;
   onRetry: (post: CommunityPost) => void;
-  onDelete: (postId: string) => void;
+  onDelete: (postId: string, isOwnMessage: boolean) => void;
   onSelectPaper?: (paperId: string) => void;
   onToggleSavePaper: (paperId: string) => void;
 }
@@ -173,9 +174,9 @@ const MessageBubbleItem = React.memo<MessageBubbleProps>(({
     )}
 
     <TouchableOpacity
-      activeOpacity={isOwnMessage ? 0.7 : 1}
+      activeOpacity={0.7}
       onPress={() => item.status === 'failed' && onRetry(item)}
-      onLongPress={() => isOwnMessage && onDelete(item.id)}
+      onLongPress={() => onDelete(item.id, isOwnMessage)}
       style={[
         styles.messageBubble,
         isOwnMessage
@@ -397,10 +398,32 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const flatListRef = useRef<FlatList<CommunityPost>>(null);
   const isNearBottomRef = useRef(true);
   const seenPostIdsRef = useRef<Set<string>>(new Set());
+  const hiddenPostIdsRef = useRef<Set<string>>(new Set());
+  const selectedCommunityRef = useRef<Community | null>(null);
   const seededCommunitiesRef = useRef<Set<string>>(new Set());
   const sessionStartTimeRef = useRef<number>(Date.now());
   const initialSyncDoneRef = useRef(false);
   const chatTransitionAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    selectedCommunityRef.current = selectedCommunity;
+  }, [selectedCommunity]);
+
+  const hiddenPostsStorageKey = `${HIDDEN_COMMUNITY_POSTS_KEY_PREFIX}${user?.id || 'guest'}`;
+
+  useEffect(() => {
+    hiddenPostIdsRef.current = new Set();
+    AsyncStorage.getItem(hiddenPostsStorageKey).then(raw => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((id: string) => hiddenPostIdsRef.current.add(String(id)));
+          }
+        } catch {}
+      }
+    }).catch(() => {});
+  }, [hiddenPostsStorageKey]);
 
   // Track active open community so foreground notifications don't fire for the chat user is reading
   useEffect(() => {
@@ -538,9 +561,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           const parsed: Community = JSON.parse(cachedDetail);
           if (parsed && parsed.id === communityId) {
             loadedFromCache = true;
-            setSelectedCommunity(parsed);
+            const visibleCachedPosts = (parsed.posts || []).filter(p => !hiddenPostIdsRef.current.has(String(p.id)));
+            setSelectedCommunity({ ...parsed, posts: visibleCachedPosts });
             chatTransitionAnim.setValue(1);
-            parsed.posts?.forEach((p) => seenPostIdsRef.current.add(p.id));
+            visibleCachedPosts.forEach((p) => seenPostIdsRef.current.add(p.id));
             setTimeout(() => {
               flatListRef.current?.scrollToEnd({ animated: false });
             }, 60);
@@ -553,7 +577,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
       if (res.success && res.data) {
         const decryptedPosts = await decryptPosts(res.data.posts || [], communityId);
         // Sort chronologically: oldest at top, latest at bottom
-        const sorted = sortPostsChronological(decryptedPosts);
+        const sorted = sortPostsChronological(decryptedPosts).filter(
+          p => !hiddenPostIdsRef.current.has(String(p.id))
+        );
 
         // Pre-populate seen IDs so device notifications don't fire for past messages
         sorted.forEach(p => seenPostIdsRef.current.add(p.id));
@@ -669,8 +695,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
       const postId = String(incomingPost.id || (incomingPost as any)._id || '');
       if (!postId) return;
 
-      // Skip if we already have this post (e.g. our own optimistic post just resolved)
-      if (seenPostIdsRef.current.has(postId)) return;
+      // Skip if we already have this post (e.g. our own optimistic post just resolved) or user deleted it for themselves
+      if (seenPostIdsRef.current.has(postId) || hiddenPostIdsRef.current.has(postId)) return;
       seenPostIdsRef.current.add(postId);
       AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
 
@@ -759,7 +785,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             // The user is literally right here watching the conversation in real time.
 
             const allDecrypted = await decryptPosts(rawPosts, selectedCommunity.id);
-            const chronological = sortPostsChronological(allDecrypted);
+            const chronological = sortPostsChronological(allDecrypted).filter(
+              p => !hiddenPostIdsRef.current.has(String(p.id))
+            );
             setSelectedCommunity(prev => {
               if (!prev) return null;
               const nextCommunity = { ...prev, ...res.data, posts: mergeWithPendingPosts(chronological, prev.posts) };
@@ -1289,93 +1317,109 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     await transmitPost(commId, tempPostId, typedContent, paperIds, papersAttached);
   };
 
-  const handleToggleSavePaper = async (paperId: string) => {
+  const handleToggleSavePaper = useCallback(async (paperId: string) => {
+    const activeCommunity = selectedCommunityRef.current;
     try {
-      const paperObj = selectedCommunity?.posts?.flatMap(p => p.papers || []).find(p => p.id === paperId);
+      const paperObj = activeCommunity?.posts?.flatMap(p => p.papers || []).find(p => p.id === paperId);
       const res = await papersApi.toggleSave(paperId, paperObj);
-      if (res.success && res.data && selectedCommunity) {
-        const updatedPosts = (selectedCommunity.posts || []).map((post) => {
-          if (post.papers && post.papers.length > 0 && post.papers[0].id === paperId) {
-            return {
-              ...post,
-              papers: [{ ...post.papers[0], saved: res.data?.saved }]
-            };
-          }
-          return post;
-        });
-        setSelectedCommunity({
-          ...selectedCommunity,
-          posts: updatedPosts
+      if (res.success && res.data) {
+        setSelectedCommunity(prev => {
+          if (!prev) return prev;
+          const updatedPosts = (prev.posts || []).map((post) => {
+            if (post.papers && post.papers.length > 0 && post.papers[0].id === paperId) {
+              return {
+                ...post,
+                papers: [{ ...post.papers[0], saved: res.data?.saved }]
+              };
+            }
+            return post;
+          });
+          return { ...prev, posts: updatedPosts };
         });
       }
     } catch (err) {
       console.warn('Failed to save paper:', err);
     }
-  };
+  }, []);
 
-  const handleDeletePost = (postId: string) => {
-    if (!selectedCommunity) return;
-    
-    Alert.alert(
-      'Delete Message',
-      'Do you want to delete this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Delete for me', 
-          onPress: () => {
-            // Only hide locally
-            setSelectedCommunity(prev => {
-              if (!prev) return prev;
-              const nextCommunity = {
-                ...prev,
-                posts: prev.posts?.filter(p => p.id !== postId)
-              };
-              persistCommunityDetailCache(nextCommunity);
-              return nextCommunity;
-            });
+  const handleDeletePost = useCallback((postId: string, isOwnMessage: boolean) => {
+    const activeCommunity = selectedCommunityRef.current;
+    if (!activeCommunity) return;
+    const commId = String(activeCommunity.id || (activeCommunity as any)._id || '');
+    if (!commId) return;
+
+    const removeLocally = (persistHidden: boolean) => {
+      if (persistHidden) {
+        hiddenPostIdsRef.current.add(String(postId));
+        AsyncStorage.setItem(
+          hiddenPostsStorageKey,
+          JSON.stringify(Array.from(hiddenPostIdsRef.current))
+        ).catch(() => {});
+      }
+      setSelectedCommunity(prev => {
+        if (!prev) return prev;
+        const nextCommunity = {
+          ...prev,
+          posts: prev.posts?.filter(p => p.id !== postId)
+        };
+        persistCommunityDetailCache(nextCommunity);
+        return nextCommunity;
+      });
+    };
+
+    const buttons: Array<{ text: string; style?: 'cancel' | 'destructive' | 'default'; onPress?: () => void }> = [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete for me',
+        onPress: () => removeLocally(true),
+      },
+    ];
+
+    if (isOwnMessage) {
+      buttons.push({
+        text: 'Delete for everyone',
+        style: 'destructive',
+        onPress: async () => {
+          if (String(postId).startsWith('temp-')) {
+            removeLocally(false);
+            return;
+          }
+          try {
+            const res = await communityApi.deletePost(commId, postId);
+            if (!res.success) {
+              Alert.alert('Error', res.error || 'Failed to delete message from server.');
+              return;
+            }
+            removeLocally(false);
+          } catch (err: any) {
+            Alert.alert('Error', err?.message || 'Failed to delete message.');
+            console.warn('Failed to delete post:', err);
           }
         },
-        { 
-          text: 'Delete for everyone', 
-          style: 'destructive', 
-          onPress: async () => {
-            try {
-              // Delete from server
-              const res = await communityApi.deletePost(selectedCommunity.id, postId);
-              if (!res.success) {
-                Alert.alert('Error', res.error || 'Failed to delete message from server.');
-                return;
-              }
-              // Update local state & cache
-              setSelectedCommunity(prev => {
-                if (!prev) return prev;
-                const nextCommunity = {
-                  ...prev,
-                  posts: prev.posts?.filter(p => p.id !== postId)
-                };
-                persistCommunityDetailCache(nextCommunity);
-                return nextCommunity;
-              });
-            } catch (err: any) {
-              Alert.alert('Error', err?.message || 'Failed to delete message.');
-              console.warn('Failed to delete post:', err);
-            }
-          }
-        }
-      ]
+      });
+    }
+
+    Alert.alert(
+      'Delete Message',
+      isOwnMessage ? 'Do you want to delete this message?' : 'Hide this message from your view?',
+      buttons
     );
-  };
+  }, [hiddenPostsStorageKey]);
 
   // Button text/icon dynamic styling matching black/white theme
   const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
 
   const renderMessageItem = useCallback(({ item }: { item: CommunityPost }) => {
+    const postAuthorId =
+      typeof item.user_id === 'object' && item.user_id !== null
+        ? ((item.user_id as any).id || (item.user_id as any)._id)
+        : (item.user_id || (item.author as any)?.id);
+
     const isOwnMessage =
       item.author?.avatar_initials === 'ME' ||
       item.author?.name === 'You (Researcher)' ||
-      (user && item.author?.name === user.name) ||
-      (user && item.user_id === user.id);
+      (user && postAuthorId && String(postAuthorId) === String(user.id)) ||
+      (user && !postAuthorId && item.author?.name === user.name);
 
     return (
       <MessageBubbleItem
@@ -1390,7 +1434,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
         onToggleSavePaper={handleToggleSavePaper}
       />
     );
-  }, [user, colors, primaryBtnTextColor, onSelectPaper]);
+  }, [user, colors, primaryBtnTextColor, onSelectPaper, handleDeletePost, handleToggleSavePaper]);
 
   const renderCommunityItem = useCallback(({ item }: { item: Community }) => {
     const isAdmin = Boolean(item.isAdmin || (user && String(item.created_by) === String(user.id)));

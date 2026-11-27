@@ -1298,17 +1298,20 @@ export const communityApi = {
   },
 
   deletePost: async (communityId: string, postId: string): Promise<ApiResponse<any>> => {
-    try {
-      return await request<any>(`/community/${communityId}/posts/${postId}`, {
-        method: 'DELETE',
-      });
-    } catch {
+    if (communityId.startsWith('comm-') || postId.startsWith('post-') || postId.startsWith('temp-')) {
       const comm = localCommunities.find(c => c.id === communityId);
       if (comm && comm.posts) {
         comm.posts = comm.posts.filter(p => p.id !== postId);
         persistLocalCommunities(localCommunities);
       }
       return { success: true, data: null };
+    }
+    try {
+      return await request<any>(`/community/${communityId}/posts/${postId}`, {
+        method: 'DELETE',
+      });
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to delete message from server' };
     }
   },
 
