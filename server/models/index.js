@@ -59,6 +59,7 @@ const userSchema = new mongoose.Schema({
   avatar_url: { type: String },                        // profile picture URL (from Google or upload)
   interests: [{ type: String }],                       // list of research topics the user picked
   hasSelectedInterests: { type: Boolean, default: false }, // tracks if user completed the onboarding step
+  pushTokens: [{ type: String }],                      // Expo/FCM push tokens for closed-app notifications
 
   // [SECURITY - MED-05]: Account Lockout Defense Fields
   failed_login_attempts: { type: Number, default: 0 }, // tracks consecutive failed logins on this email

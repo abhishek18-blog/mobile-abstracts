@@ -23,7 +23,7 @@
       "package": "com.abstracts.researchhub",
       "versionCode": 2,
       "googleServicesFile": "./google-services.json",
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./logo/icon.png",
         "backgroundColor": "#090B10"
@@ -39,12 +39,13 @@
       ]
     },
     "plugins": [
+      "@react-native-google-signin/google-signin",
       [
         "expo-notifications",
         {
-          "icon": "./logo/icon.png",
+          "icon": "./logo/notification-icon.png",
           "color": "#3b82f6",
-          "defaultChannel": "recommended-research"
+          "defaultChannel": "community-messages"
         }
       ],
       [

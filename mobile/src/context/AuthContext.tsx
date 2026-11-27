@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserProfile } from '../types';
 import { userApi } from '../services/api';
+import { notificationService } from '../services/notificationService';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -86,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    await notificationService.unregisterPushToken();
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('user_profile');
     await AsyncStorage.removeItem('isGuest');

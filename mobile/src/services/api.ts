@@ -49,6 +49,8 @@ export const setCustomApiUrl = (url: string) => {
   currentApiUrl = clean.endsWith('/api') ? clean : `${clean}/api`;
 };
 
+export const getApiBaseUrl = () => currentApiUrl.replace(/\/api$/, '');
+
 // ─── SAMPLE FALLBACK DATA FOR UNAUTHENTICATED/OFFLINE GUEST USERS ─────────────
 const MOCK_PAPERS: Paper[] = [
   {
@@ -1271,23 +1273,27 @@ export const communityApi = {
         return { success: true, data: normalizedPost };
       }
       return res;
-    } catch {
-      const comm = localCommunities.find(c => c.id === communityId);
-      const papersAttached = MOCK_PAPERS.filter(p => data.paper_ids?.includes(p.id));
-      const newPost: CommunityPost = {
-        id: `post-${Date.now()}`,
-        content: data.content,
-        author: { name: 'You (Researcher)', role: 'Contributor', avatar_initials: 'ME' },
-        likes: 0,
-        created_at: new Date().toISOString(),
-        papers: papersAttached,
-      };
-      if (comm) {
-        comm.posts = comm.posts || [];
-        comm.posts.push(newPost);
-        persistLocalCommunities(localCommunities);
+    } catch (err: any) {
+      // Only use local mock storage for offline/mock communities; never silently mask real server/network failures
+      if (communityId.startsWith('comm-')) {
+        const comm = localCommunities.find(c => c.id === communityId);
+        const papersAttached = MOCK_PAPERS.filter(p => data.paper_ids?.includes(p.id));
+        const newPost: CommunityPost = {
+          id: `post-${Date.now()}`,
+          content: data.content,
+          author: { name: 'You (Researcher)', role: 'Contributor', avatar_initials: 'ME' },
+          likes: 0,
+          created_at: new Date().toISOString(),
+          papers: papersAttached,
+        };
+        if (comm) {
+          comm.posts = comm.posts || [];
+          comm.posts.push(newPost);
+          persistLocalCommunities(localCommunities);
+        }
+        return { success: true, data: newPost };
       }
-      return { success: true, data: newPost };
+      return { success: false, error: err?.message || 'Failed to send message' };
     }
   },
 
@@ -1369,6 +1375,20 @@ export const userApi = {
     return request<UserProfile>('/user', {
       method: 'PUT',
       body: JSON.stringify({ avatar_url: avatarUrlOrBase64 }),
+    });
+  },
+
+  registerPushToken: async (pushToken: string) => {
+    return request<{ message: string }>('/user/push-token', {
+      method: 'POST',
+      body: JSON.stringify({ pushToken }),
+    });
+  },
+
+  unregisterPushToken: async (pushToken: string) => {
+    return request<{ message: string }>('/user/push-token', {
+      method: 'DELETE',
+      body: JSON.stringify({ pushToken }),
     });
   },
 };

@@ -73,7 +73,6 @@ export const SettingsScreen: React.FC = () => {
 
   // Notification preferences state
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>({
-    paperAlerts: true,
     communityAlerts: true,
   });
 
@@ -504,27 +503,10 @@ export const SettingsScreen: React.FC = () => {
             <Text style={[styles.cardTitle, { color: colors.text }]}>Notifications & Device Alerts</Text>
           </View>
           <Text style={[styles.fieldSub, { color: colors.textMuted }]}>
-            Receive notifications directly on your installed app for new research and community messages:
+            Receive notifications directly on your installed app for community chat messages:
           </Text>
 
-          {/* Toggle 1: Recommended Research Alerts */}
-          <TouchableOpacity
-            style={[styles.prefToggleRow, { borderBottomColor: colors.border + '50' }]}
-            onPress={() => handleTogglePref('paperAlerts')}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1, marginRight: 12 }}>
-              <Text style={[styles.prefTitle, { color: colors.text }]}>Recommended Paper Alerts</Text>
-              <Text style={[styles.prefSub, { color: colors.textMuted }]}>
-                "A new research from..." alerts when new papers match your interests
-              </Text>
-            </View>
-            <View style={[styles.switchTrack, notificationPrefs.paperAlerts ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]}>
-              <View style={[styles.switchThumb, notificationPrefs.paperAlerts ? styles.switchThumbActive : styles.switchThumbInactive]} />
-            </View>
-          </TouchableOpacity>
-
-          {/* Toggle 2: Community Messages */}
+          {/* Toggle: Community Messages */}
           <TouchableOpacity
             style={[styles.prefToggleRow, { borderBottomColor: colors.border + '50' }]}
             onPress={() => handleTogglePref('communityAlerts')}
@@ -533,7 +515,7 @@ export const SettingsScreen: React.FC = () => {
             <View style={{ flex: 1, marginRight: 12 }}>
               <Text style={[styles.prefTitle, { color: colors.text }]}>Community Message Alerts</Text>
               <Text style={[styles.prefSub, { color: colors.textMuted }]}>
-                Instant notifications when researchers post in joined groups
+                Instant notifications when researchers post in joined groups (works even when app is closed)
               </Text>
             </View>
             <View style={[styles.switchTrack, notificationPrefs.communityAlerts ? { backgroundColor: colors.primary } : { backgroundColor: colors.border }]}>

@@ -210,3 +210,45 @@ export const deleteAccount = async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to delete account' });
   }
 };
+
+// ─────────────────────────────────────────────
+// 🔔 PUSH TOKENS — Register / Unregister device for closed-app notifications
+// ─────────────────────────────────────────────
+export const registerPushToken = async (req, res) => {
+  try {
+    const { pushToken } = req.body;
+    if (!pushToken || typeof pushToken !== 'string' || pushToken.length > 512) {
+      return res.status(400).json({ success: false, error: 'Valid pushToken is required' });
+    }
+
+    await User.findByIdAndUpdate(
+      req.userId,
+      { $addToSet: { pushTokens: pushToken } },
+      { new: true }
+    );
+
+    res.json({ success: true, message: 'Push token registered' });
+  } catch (error) {
+    console.error('Error registering push token:', error);
+    res.status(500).json({ success: false, error: 'Failed to register push token' });
+  }
+};
+
+export const unregisterPushToken = async (req, res) => {
+  try {
+    const { pushToken } = req.body;
+    if (!pushToken || typeof pushToken !== 'string') {
+      return res.status(400).json({ success: false, error: 'pushToken is required' });
+    }
+
+    await User.findByIdAndUpdate(
+      req.userId,
+      { $pull: { pushTokens: pushToken } }
+    );
+
+    res.json({ success: true, message: 'Push token removed' });
+  } catch (error) {
+    console.error('Error removing push token:', error);
+    res.status(500).json({ success: false, error: 'Failed to remove push token' });
+  }
+};

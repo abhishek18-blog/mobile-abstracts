@@ -20,7 +20,6 @@ import { recommendationApi, papersApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
 import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
-import { notificationService } from '../services/notificationService';
 
 // ─── Offline Cache Helpers ───────────────────────────────────────────────────
 const REC_CACHE_PREFIX = '@rec_cache:';
@@ -124,8 +123,6 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
         setIsOffline(false);
         // ── Persist fresh results for next offline session ──
         saveRecsToStorage(selectedInterest, results);
-        // ── Check if any fresh paper should trigger a notification ──
-        notificationService.checkAndNotifyNewRecommendedPapers([selectedInterest]);
       } else {
         // No live results — if we have nothing displayed, check storage
         const cached = await loadRecsFromStorage(selectedInterest);

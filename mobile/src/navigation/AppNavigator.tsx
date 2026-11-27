@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, Animated } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, Bookmark, Compass, Users, Settings } from 'lucide-react-native';
@@ -33,6 +34,7 @@ export const AppNavigator: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabName>('discover');
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
+  const [pendingCommunityId, setPendingCommunityId] = useState<string | null>(null);
   const [showLanding, setShowLanding] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
   const insets = useSafeAreaInsets();
@@ -79,26 +81,30 @@ export const AppNavigator: React.FC = () => {
     ]).start();
   }, [tabScales]);
 
-  // Initialize notifications on app launch and schedule background checks for recommended papers
+  // Initialize community notifications & register device push token for closed-app alerts
   useEffect(() => {
     notificationService.initialize();
-
-    if (interests && interests.length > 0) {
-      // Check after a brief delay so initial load is smooth
-      const initialTimer = setTimeout(() => {
-        notificationService.checkAndNotifyNewRecommendedPapers(interests);
-      }, 3000);
-
-      const interval = setInterval(() => {
-        notificationService.checkAndNotifyNewRecommendedPapers(interests);
-      }, 60000);
-
-      return () => {
-        clearTimeout(initialTimer);
-        clearInterval(interval);
-      };
+    if (token && !isGuest) {
+      notificationService.registerForPushNotificationsAsync();
     }
-  }, [interests]);
+  }, [token, isGuest]);
+
+  // Handle tapping a community notification (from foreground, background, or cold start)
+  useEffect(() => {
+    const handleResponse = (response: Notifications.NotificationResponse | null) => {
+      const data = response?.notification?.request?.content?.data as any;
+      if (data?.screen === 'Community' || data?.communityId) {
+        setActiveTab('community');
+        if (data?.communityId) {
+          setPendingCommunityId(String(data.communityId));
+        }
+      }
+    };
+
+    Notifications.getLastNotificationResponseAsync().then(handleResponse).catch(() => {});
+    const sub = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    return () => sub.remove();
+  }, []);
 
   // Initial Splash Screen with Abstracts SVG Logo and Creative Animated Spinner
   if (showSplash || isLoading || interestsLoading) {
@@ -195,7 +201,11 @@ export const AppNavigator: React.FC = () => {
             ]}
             pointerEvents={activeTab === 'community' ? 'auto' : 'none'}
           >
-            <MemoCommunityScreen onSelectPaper={handleSelectPaper} />
+            <MemoCommunityScreen
+              onSelectPaper={handleSelectPaper}
+              pendingCommunityId={pendingCommunityId}
+              onClearPendingCommunity={() => setPendingCommunityId(null)}
+            />
           </View>
         )}
 
