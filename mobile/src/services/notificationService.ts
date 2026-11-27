@@ -110,7 +110,6 @@ class NotificationService {
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#3b82f6',
-          sound: 'default',
           enableVibrate: true,
           showBadge: true,
         });
@@ -122,7 +121,6 @@ class NotificationService {
         await Notifications.setNotificationChannelAsync('default', {
           name: 'General Alerts',
           importance: Notifications.AndroidImportance.MAX,
-          sound: 'default',
           enableVibrate: true,
           showBadge: true,
         });
@@ -212,7 +210,7 @@ class NotificationService {
           title: `${senderName || 'Researcher'} in ${communityName}`,
           body: bodyText,
           data: { communityId, screen: 'Community' },
-          sound: 'default',
+          ...(Platform.OS === 'ios' ? { sound: 'default' } : {}),
           color: '#3b82f6',
         },
         trigger: Platform.OS === 'android' ? { channelId: 'community-messages' } : null,
@@ -220,23 +218,6 @@ class NotificationService {
     } catch (err) {
       console.warn('[NotificationService] Failed to trigger community notification:', err);
     }
-  }
-
-  /**
-   * Diagnostic test alert so users can test community notifications on device
-   */
-  async sendTestNotification() {
-    await this.initialize();
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: '💬 Community Chat Notifications Active',
-        body: 'You will receive instant alerts for new community messages even when the app is closed.',
-        data: { screen: 'Community' },
-        sound: 'default',
-        color: '#3b82f6',
-      },
-      trigger: Platform.OS === 'android' ? { channelId: 'community-messages' } : null,
-    });
   }
 }
 

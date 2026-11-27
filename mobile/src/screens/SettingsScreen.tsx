@@ -85,11 +85,6 @@ export const SettingsScreen: React.FC = () => {
     setNotificationPrefs(updated);
   };
 
-  const handleSendTestNotification = async () => {
-    await notificationService.sendTestNotification();
-    Alert.alert('🔔 Notification Triggered', 'A test alert has been delivered to your device notifications tray.');
-  };
-
   // Custom Topic input modal state
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
   const [customText, setCustomText] = useState('');
@@ -522,18 +517,6 @@ export const SettingsScreen: React.FC = () => {
               <View style={[styles.switchThumb, notificationPrefs.communityAlerts ? styles.switchThumbActive : styles.switchThumbInactive]} />
             </View>
           </TouchableOpacity>
-
-          {/* Test Notification Button */}
-          <TouchableOpacity
-            style={[styles.testNotifyBtn, { backgroundColor: colors.primary + '15', borderColor: colors.primary + '35' }]}
-            onPress={handleSendTestNotification}
-            activeOpacity={0.75}
-          >
-            <Bell size={15} color={colors.primary} />
-            <Text style={[styles.testNotifyBtnText, { color: colors.primary }]}>
-              Send Test Notification to Device
-            </Text>
-          </TouchableOpacity>
         </View>
 
         {/* Logout */}
@@ -725,20 +708,6 @@ const styles = StyleSheet.create({
   },
   switchThumbInactive: {
     alignSelf: 'flex-start',
-  },
-  testNotifyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 12,
-    gap: 6,
-  },
-  testNotifyBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   versionContainer: {
     alignItems: 'center',

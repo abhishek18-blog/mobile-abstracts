@@ -17,7 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Users,
   Plus,
@@ -392,9 +392,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   const [paperSearchQuery, setPaperSearchQuery] = useState('');
 
   // Refs for auto-scroll and tracking received messages for notifications
+  const containerRef = useRef<React.ComponentRef<typeof View>>(null);
+  const [androidKeyboardPadding, setAndroidKeyboardPadding] = useState(0);
   const flatListRef = useRef<FlatList<CommunityPost>>(null);
   const isNearBottomRef = useRef(true);
   const seenPostIdsRef = useRef<Set<string>>(new Set());
+  const seededCommunitiesRef = useRef<Set<string>>(new Set());
+  const sessionStartTimeRef = useRef<number>(Date.now());
   const initialSyncDoneRef = useRef(false);
   const chatTransitionAnim = useRef(new Animated.Value(0)).current;
 
@@ -414,17 +418,43 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
     }
   }, [pendingCommunityId, isGuest]);
 
-  // Smoothly scroll to bottom when keyboard opens inside a chat
+  // Handle Android keyboard overlap (especially under edgeToEdgeEnabled) without double-padding
+  // and smoothly scroll to bottom when keyboard opens inside a chat
   useEffect(() => {
-    if (!selectedCommunity) return;
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
+    if (!selectedCommunity) {
+      setAndroidKeyboardPadding(0);
+      return;
+    }
+
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      if (Platform.OS === 'android' && containerRef.current && e?.endCoordinates?.screenY) {
+        // Measure after a brief tick so adjustResize (if active) has already settled
+        setTimeout(() => {
+          containerRef.current?.measureInWindow((_x, y, _w, height) => {
+            const bottomY = y + height;
+            const overlap = Math.max(0, bottomY - e.endCoordinates.screenY);
+            setAndroidKeyboardPadding(overlap);
+          });
+        }, 40);
+      }
+
       if (isNearBottomRef.current) {
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
-        }, 60);
+        }, 80);
       }
     });
-    return () => sub.remove();
+
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      if (Platform.OS === 'android') {
+        setAndroidKeyboardPadding(0);
+      }
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, [selectedCommunity?.id]);
 
   const handleBackFromChat = () => {
@@ -770,33 +800,45 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           for (const comm of joined) {
             const detailRes = await communityApi.getById(comm.id);
             if (detailRes.success && detailRes.data && detailRes.data.posts) {
+              const isFirstSeedForComm = !seededCommunitiesRef.current.has(comm.id);
+              seededCommunitiesRef.current.add(comm.id);
+
               const unseen = detailRes.data.posts.filter(p => !seenPostIdsRef.current.has(p.id));
               if (unseen.length > 0) {
-                const decrypted = await decryptPosts(unseen, comm.id);
-                let newlyNotified = false;
-                decrypted.forEach(p => {
-                  seenPostIdsRef.current.add(p.id);
-                  const isOwn =
-                    p.author?.avatar_initials === 'ME' ||
-                    p.author?.name === 'You (Researcher)' ||
-                    (user && p.author?.name === user.name) ||
-                    (user && p.user_id === user.id);
-                  
-                  // Only notify if truly from someone else and user is not inside this community
-                  if (!isOwn) {
-                    newlyNotified = true;
-                    notificationService.sendCommunityMessageNotification({
-                      communityName: comm.name,
-                      senderName: p.author?.name || 'Researcher',
-                      content: p.content,
-                      communityId: comm.id,
-                      hasAttachment: !!(p.papers && p.papers.length > 0),
-                    });
-                  }
-                });
-
-                if (newlyNotified) {
+                if (isFirstSeedForComm) {
+                  // Silently mark historical posts as seen on first check so opening the app never replays old notifications
+                  unseen.forEach(p => seenPostIdsRef.current.add(p.id));
                   AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
+                } else {
+                  const decrypted = await decryptPosts(unseen, comm.id);
+                  let newlySeenAdded = false;
+                  decrypted.forEach(p => {
+                    seenPostIdsRef.current.add(p.id);
+                    newlySeenAdded = true;
+                    const isOwn =
+                      p.author?.avatar_initials === 'ME' ||
+                      p.author?.name === 'You (Researcher)' ||
+                      (user && p.author?.name === user.name) ||
+                      (user && p.user_id === user.id);
+
+                    const postTime = p.created_at ? new Date(p.created_at).getTime() : 0;
+                    const isNewInSession = postTime >= sessionStartTimeRef.current;
+
+                    // Only notify if truly from someone else, created after app open, and user is not inside this community
+                    if (!isOwn && isNewInSession) {
+                      notificationService.sendCommunityMessageNotification({
+                        communityName: comm.name,
+                        senderName: p.author?.name || 'Researcher',
+                        content: p.content,
+                        communityId: comm.id,
+                        hasAttachment: !!(p.papers && p.papers.length > 0),
+                      });
+                    }
+                  });
+
+                  if (newlySeenAdded) {
+                    AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
+                  }
                 }
               }
             }
@@ -972,6 +1014,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
             try {
               const res = await communityApi.deleteCommunity(selectedCommunity.id);
               if (res.success) {
+                AsyncStorage.removeItem(`${OFFLINE_COMMUNITY_DETAIL_PREFIX}${selectedCommunity.id}`).catch(() => {});
                 Alert.alert('Deleted', 'Community has been deleted.');
                 setIsInfoModalOpen(false);
                 setSelectedCommunity(null);
@@ -1299,7 +1342,11 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           onPress: async () => {
             try {
               // Delete from server
-              await communityApi.deletePost(selectedCommunity.id, postId);
+              const res = await communityApi.deletePost(selectedCommunity.id, postId);
+              if (!res.success) {
+                Alert.alert('Error', res.error || 'Failed to delete message from server.');
+                return;
+              }
               // Update local state & cache
               setSelectedCommunity(prev => {
                 if (!prev) return prev;
@@ -1310,7 +1357,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
                 persistCommunityDetailCache(nextCommunity);
                 return nextCommunity;
               });
-            } catch (err) {
+            } catch (err: any) {
+              Alert.alert('Error', err?.message || 'Failed to delete message.');
               console.warn('Failed to delete post:', err);
             }
           }
@@ -1359,7 +1407,19 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
   }, [user, colors, theme]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+    <View
+      ref={containerRef}
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.background,
+          paddingTop: insets.top,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+          paddingBottom: Platform.OS === 'android' && selectedCommunity ? androidKeyboardPadding : 0,
+        },
+      ]}
+    >
       {selectedCommunity ? (
         // ─────────────────────────────────────────────────────────────────────────────
         // 1. DEDICATED CHAT VIEW (Screen 2 in reference image)
@@ -1441,12 +1501,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           {/* Posts List */}
           <FlatList<CommunityPost>
             ref={flatListRef}
+            style={{ flex: 1 }}
             data={selectedCommunity.posts || []}
             keyExtractor={(item: CommunityPost, index: number) => (item?.id ? String(item.id) : `post-${index}`)}
             initialNumToRender={15}
             maxToRenderPerBatch={12}
             windowSize={9}
-            removeClippedSubviews={Platform.OS === 'android'}
+            removeClippedSubviews={false}
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={100}
@@ -2076,7 +2137,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 };
 
