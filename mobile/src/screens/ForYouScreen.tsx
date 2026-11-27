@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Compass, Sparkles, Plus, X, WifiOff } from 'lucide-react-native';
+import { Compass, Sparkles, Plus, X, WifiOff, Bot, Globe } from 'lucide-react-native';
 import { Paper } from '../types';
 import { recommendationApi, papersApi, cachePapers } from '../services/api';
 import { PaperCard } from '../components/PaperCard';
@@ -155,7 +155,8 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
 
   const handleToggleSave = async (paperId: string) => {
     try {
-      const res = await papersApi.toggleSave(paperId);
+      const paperObj = papers.find(p => p.id === paperId);
+      const res = await papersApi.toggleSave(paperId, paperObj);
       if (res.success && res.data) {
         setPapers((prev) =>
           prev.map((p) => (p.id === paperId ? { ...p, saved: res.data?.saved } : p))
@@ -307,12 +308,14 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
     );
   }
 
-  // Header rendered as a non-scrollable block above the paper list
+  // Header rendered as a non-scrollable block above the paper list matching 3.png
   const ListHeader = (
     <View style={styles.header}>
       <View style={styles.titleRow}>
         <Text style={[styles.title, { color: colors.text }]}>Recommended For You</Text>
-        <Compass size={22} color={colors.primary} />
+        <View style={[styles.compassBtn, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Compass size={20} color={colors.primary} strokeWidth={2.2} />
+        </View>
       </View>
 
       {/* Offline Banner */}
@@ -325,42 +328,42 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
         </View>
       )}
 
-      {/* Horizontal topic pills */}
+      {/* Horizontal topic pills matching 3.png */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.topicList}
       >
-        {interests.map((interest) => (
-          <View key={interest} style={styles.topicChipWrapper}>
-            <TouchableOpacity
-              style={[
-                styles.topicChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-                selectedInterest === interest && { backgroundColor: colors.primary, borderColor: colors.primary }
-              ]}
-              onPress={() => setSelectedInterest(interest)}
-            >
-              <Text
+        {interests.map((interest) => {
+          const isSelected = selectedInterest === interest;
+          return (
+            <View key={interest} style={styles.topicChipWrapper}>
+              <TouchableOpacity
                 style={[
-                  styles.topicText,
-                  { color: colors.textMuted },
-                  selectedInterest === interest && { color: primaryBtnTextColor, fontWeight: '700' }
+                  styles.topicChip,
+                  isSelected
+                    ? styles.topicChipActive
+                    : [styles.topicChipInactive, { backgroundColor: colors.card, borderColor: colors.border }]
                 ]}
+                onPress={() => setSelectedInterest(interest)}
+                activeOpacity={0.8}
               >
-                {interest}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+                {isSelected && (
+                  <Globe size={14} color="#FFFFFF" strokeWidth={2.2} />
+                )}
+                <Text
+                  style={[
+                    styles.topicText,
+                    isSelected ? styles.topicTextActive : [styles.topicTextInactive, { color: colors.text }]
+                  ]}
+                >
+                  {interest}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          );
+        })}
       </ScrollView>
-
-      {/* Source indicator */}
-      {apiSource ? (
-        <Text style={[styles.sourceTag, { color: colors.textMuted }]}>
-          📡 Source: {apiSource}
-        </Text>
-      ) : null}
     </View>
   );
 
@@ -377,7 +380,7 @@ export const ForYouScreen: React.FC<ForYouScreenProps> = ({ onSelectPaper }) => 
       ) : (
         <FlatList<Paper>
           data={papers}
-          keyExtractor={(item: Paper) => item.id}
+          keyExtractor={(item: Paper, index: number) => (item?.id ? `${item.id}-${index}` : `rec-${index}`)}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -419,18 +422,39 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 4,
+    minHeight: 44,
   },
   title: {
     fontSize: 24,
     fontWeight: '800',
+    letterSpacing: -0.4,
+    lineHeight: 28,
+  },
+  subtitle: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  compassBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   topicList: {
     paddingVertical: 4,
@@ -441,20 +465,58 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   topicChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingVertical: 7,
+    borderRadius: 18,
     borderWidth: 1,
+  },
+  topicChipActive: {
+    backgroundColor: '#1363F5',
+    borderColor: '#1363F5',
+    shadowColor: '#1363F5',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  topicChipInactive: {
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
   },
   topicText: {
     fontSize: 13,
     fontWeight: '600',
   },
-  sourceTag: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 8,
-    textAlign: 'right',
+  topicTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  topicTextInactive: {
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  sourceTagPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    gap: 6,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  sourceTagText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#1D4ED8',
   },
   offlineBanner: {
     flexDirection: 'row',
@@ -477,7 +539,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 0,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   center: {
     flex: 1,

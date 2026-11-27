@@ -17,26 +17,20 @@ const InterestsContext = createContext<InterestsContextType | undefined>(undefin
 async function syncInterestsToServer(interests: string[], hasSelected: boolean) {
   try {
     const token = await AsyncStorage.getItem('token');
-    if (!token) return; // Guest mode — skip server sync
+    if (!token) return null; // Guest mode — skip server sync
 
-    const { DEFAULT_API_URL } = await import('../services/api');
-    const res = await fetch(`${DEFAULT_API_URL.replace(/\/api$/, '')}/api/user`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        interests,
-        hasSelectedInterests: hasSelected,
-      }),
+    const { userApi } = await import('../services/api');
+    const res = await userApi.updateProfile({
+      interests,
+      hasSelectedInterests: hasSelected,
     });
-    const json = await res.json();
-    if (!json.success) {
-      console.warn('Failed to sync interests to server:', json.error);
+    if (!res.success) {
+      console.warn('Failed to sync interests to server:', res.error);
     }
+    return res;
   } catch (err) {
     console.warn('Failed to sync interests to server:', err);
+    return null;
   }
 }
 
@@ -46,26 +40,14 @@ async function loadInterestsFromServer(): Promise<{ interests: string[]; hasSele
     const token = await AsyncStorage.getItem('token');
     if (!token) return null;
 
-    const { DEFAULT_API_URL } = await import('../services/api');
-    
-    // Add 3-second timeout guard to prevent network hangs from blocking app startup
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-    const res = await fetch(`${DEFAULT_API_URL.replace(/\/api$/, '')}/api/user`, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    const json = await res.json();
-    if (json.success && json.data) {
+    const { userApi } = await import('../services/api');
+    const res = await userApi.getProfile();
+    if (res.success && res.data) {
+      const interests = res.data.interests || [];
+      const hasSelected = Boolean(res.data.hasSelectedInterests || interests.length > 0);
       return {
-        interests: json.data.interests || [],
-        hasSelected: json.data.hasSelectedInterests || false,
+        interests,
+        hasSelected,
       };
     }
   } catch (err) {
@@ -78,18 +60,17 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [interests, setInterests] = useState<string[]>([]);
   const [hasSelected, setHasSelected] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
 
   // Sync state whenever the authenticated user changes (e.g. after login)
   useEffect(() => {
     if (user) {
-      if (user.interests && user.interests.length > 0) {
-        setInterests(user.interests);
+      const userInterests = user.interests || [];
+      const userHasSelected = Boolean(user.hasSelectedInterests || userInterests.length > 0);
+      if (userHasSelected) {
+        setInterests(userInterests);
         setHasSelected(true);
-        AsyncStorage.setItem('user_interests', JSON.stringify(user.interests));
-        AsyncStorage.setItem('user_interests_selected', 'true');
-      } else if ((user as any).hasSelectedInterests) {
-        setHasSelected(true);
+        AsyncStorage.setItem('user_interests', JSON.stringify(userInterests));
         AsyncStorage.setItem('user_interests_selected', 'true');
       }
     }
@@ -152,7 +133,11 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await AsyncStorage.setItem('user_interests', JSON.stringify(newInterests));
     await AsyncStorage.setItem('user_interests_selected', 'true');
     // Sync to MongoDB
-    await syncInterestsToServer(newInterests, true);
+    const res = await syncInterestsToServer(newInterests, true);
+    if (res?.success && res.data && setUser) {
+      setUser(res.data);
+      await AsyncStorage.setItem('user_profile', JSON.stringify(res.data));
+    }
     return true;
   };
 
@@ -162,7 +147,11 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await AsyncStorage.setItem('user_interests', JSON.stringify([]));
     await AsyncStorage.setItem('user_interests_selected', 'true');
     // Sync skip state to server
-    await syncInterestsToServer([], true);
+    const res = await syncInterestsToServer([], true);
+    if (res?.success && res.data && setUser) {
+      setUser(res.data);
+      await AsyncStorage.setItem('user_profile', JSON.stringify(res.data));
+    }
   };
 
   const clearInterests = async () => {
@@ -170,8 +159,8 @@ export const InterestsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setHasSelected(false);
     await AsyncStorage.removeItem('user_interests');
     await AsyncStorage.removeItem('user_interests_selected');
-    // Sync cleared state to server
-    await syncInterestsToServer([], false);
+    // NOTE: We do NOT wipe user profile interests in MongoDB on session logout
+    // so returning logged-in users keep their saved preferences!
   };
 
   return (

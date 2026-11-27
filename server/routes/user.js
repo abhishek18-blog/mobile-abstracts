@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { v4 as uuidv4 } from 'uuid';
-import { getUserProfile, updateUserProfile, uploadAvatar, addPassword, deleteAccount } from '../controllers/userController.js';
+import { getUserProfile, updateUserProfile, uploadAvatar, addPassword, deleteAccount, registerPushToken, unregisterPushToken } from '../controllers/userController.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +46,8 @@ router.get('/', getUserProfile);
 router.put('/', updateUserProfile);
 router.post('/avatar', upload.single('avatar'), uploadAvatar);
 router.post('/password', addPassword);
+router.post('/push-token', registerPushToken);
+router.delete('/push-token', unregisterPushToken);
 router.delete('/account', deleteAccount);
 
 export default router;

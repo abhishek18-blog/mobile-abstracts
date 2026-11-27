@@ -73,16 +73,17 @@ class EncryptionService {
    * Cached in memory and AsyncStorage.
    */
   async getCommunityRoomKey(communityId: string): Promise<Uint8Array> {
-    if (this.roomKeyCache.has(communityId)) {
-      return this.roomKeyCache.get(communityId)!;
+    const safeId = String(communityId || 'default-room');
+    if (this.roomKeyCache.has(safeId)) {
+      return this.roomKeyCache.get(safeId)!;
     }
 
-    const storageKey = `@e2ee_room_key_${communityId}`;
+    const storageKey = `@e2ee_room_key_${safeId}`;
     try {
       const stored = await AsyncStorage.getItem(storageKey);
       if (stored) {
         const key = hexToBytes(stored);
-        this.roomKeyCache.set(communityId, key);
+        this.roomKeyCache.set(safeId, key);
         return key;
       }
     } catch (err) {
@@ -91,7 +92,7 @@ class EncryptionService {
 
     // Deterministic key derivation via HKDF (SHA-256) based on community ID and salt
     // Allows all members authorized in this community to communicate securely
-    const key = hkdf(sha256, utf8ToBytes(communityId), SALT_COMMUNITY, utf8ToBytes('community-room-key'), 32);
+    const key = hkdf(sha256, utf8ToBytes(safeId), SALT_COMMUNITY, utf8ToBytes('community-room-key'), 32);
 
     try {
       await AsyncStorage.setItem(storageKey, bytesToHex(key));
@@ -99,7 +100,7 @@ class EncryptionService {
       console.warn('[E2EE] Failed to cache room key to AsyncStorage:', err);
     }
 
-    this.roomKeyCache.set(communityId, key);
+    this.roomKeyCache.set(safeId, key);
     return key;
   }
 

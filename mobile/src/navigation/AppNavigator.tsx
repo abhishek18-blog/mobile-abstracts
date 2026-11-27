@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Animated } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Search, Bookmark, Compass, Users, Settings } from 'lucide-react-native';
@@ -18,22 +19,91 @@ import { useTheme } from '../context/ThemeContext';
 import { useInterests } from '../context/InterestsContext';
 import { notificationService } from '../services/notificationService';
 
+// Memoize tab screen components so background tabs NEVER unnecessarily re-render on tab switch
+const MemoDiscoverScreen = React.memo(DiscoverScreen);
+const MemoLibraryScreen = React.memo(LibraryScreen);
+const MemoForYouScreen = React.memo(ForYouScreen);
+const MemoCommunityScreen = React.memo(CommunityScreen);
+const MemoSettingsScreen = React.memo(SettingsScreen);
+
 type TabName = 'discover' | 'library' | 'foryou' | 'community' | 'settings';
 
 export const AppNavigator: React.FC = () => {
   const { token, isGuest, isLoading, enterGuestMode } = useAuth();
-  const { hasSelected, loading: interestsLoading } = useInterests();
+  const { interests, hasSelected, loading: interestsLoading } = useInterests();
   const [showSplash, setShowSplash] = useState(true);
   const [activeTab, setActiveTab] = useState<TabName>('discover');
   const [selectedPaperId, setSelectedPaperId] = useState<string | null>(null);
+  const [pendingCommunityId, setPendingCommunityId] = useState<string | null>(null);
   const [showLanding, setShowLanding] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
   const insets = useSafeAreaInsets();
   const { theme, colors } = useTheme();
 
-  // Initialize notifications on app launch
+  // All tabs are pre-mounted from the start for instantaneous, zero-delay tab switching
+  const [loadedTabs] = useState<Record<TabName, boolean>>({
+    discover: true,
+    library: true,
+    foryou: true,
+    community: true,
+    settings: true,
+  });
+
+  // Tactile spring scale animations for the bottom tab buttons
+  const tabScales = useRef<Record<TabName, Animated.Value>>({
+    discover: new Animated.Value(1),
+    library: new Animated.Value(1),
+    foryou: new Animated.Value(1),
+    community: new Animated.Value(1),
+    settings: new Animated.Value(1),
+  }).current;
+
+  const handleSelectPaper = useCallback((id: string) => {
+    setSelectedPaperId(id);
+  }, []);
+
+  const handleTabChange = useCallback((newTab: TabName) => {
+    setActiveTab(prev => (prev === newTab ? prev : newTab));
+
+    // Immediate tactile feedback on the tapped tab button
+    Animated.sequence([
+      Animated.timing(tabScales[newTab], {
+        toValue: 0.88,
+        duration: 50,
+        useNativeDriver: true,
+      }),
+      Animated.spring(tabScales[newTab], {
+        toValue: 1,
+        friction: 5,
+        tension: 180,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [tabScales]);
+
+  // Initialize community notifications & register device push token for closed-app alerts
   useEffect(() => {
     notificationService.initialize();
+    if (token && !isGuest) {
+      notificationService.registerForPushNotificationsAsync();
+    }
+  }, [token, isGuest]);
+
+  // Handle tapping a community notification (from foreground, background, or cold start)
+  useEffect(() => {
+    const handleResponse = (response: Notifications.NotificationResponse | null) => {
+      const data = response?.notification?.request?.content?.data as any;
+      if (data?.screen === 'Community' || data?.communityId) {
+        setActiveTab('community');
+        if (data?.communityId) {
+          setPendingCommunityId(String(data.communityId));
+        }
+      }
+    };
+
+    Notifications.getLastNotificationResponseAsync().then(handleResponse).catch(() => {});
+    const sub = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    return () => sub.remove();
   }, []);
 
   // Initial Splash Screen with Abstracts SVG Logo and Creative Animated Spinner
@@ -75,36 +145,91 @@ export const AppNavigator: React.FC = () => {
     return <OnboardingScreen />;
   }
 
-  const renderActiveScreen = () => {
-    switch (activeTab) {
-      case 'discover':
-        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'library':
-        return <LibraryScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'foryou':
-        return <ForYouScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'community':
-        return <CommunityScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-      case 'settings':
-        return <SettingsScreen />;
-      default:
-        return <DiscoverScreen onSelectPaper={(id: string) => setSelectedPaperId(id)} />;
-    }
-  };
-
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
-      {/* Screen Body */}
-      <View style={styles.screenContainer}>{renderActiveScreen()}</View>
+      {/* Screen Body with Individual Tab Layers */}
+      <View style={[styles.screenContainer, { backgroundColor: colors.background }]}>
+        {loadedTabs.discover && (
+          <View
+            style={[
+              styles.tabLayer,
+              activeTab === 'discover' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
+            ]}
+            pointerEvents={activeTab === 'discover' ? 'auto' : 'none'}
+          >
+            <MemoDiscoverScreen onSelectPaper={handleSelectPaper} />
+          </View>
+        )}
+
+        {loadedTabs.library && (
+          <View
+            style={[
+              styles.tabLayer,
+              activeTab === 'library' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
+            ]}
+            pointerEvents={activeTab === 'library' ? 'auto' : 'none'}
+          >
+            <MemoLibraryScreen
+              isActive={activeTab === 'library'}
+              onSelectPaper={handleSelectPaper}
+            />
+          </View>
+        )}
+
+        {loadedTabs.foryou && (
+          <View
+            style={[
+              styles.tabLayer,
+              activeTab === 'foryou' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
+            ]}
+            pointerEvents={activeTab === 'foryou' ? 'auto' : 'none'}
+          >
+            <MemoForYouScreen onSelectPaper={handleSelectPaper} />
+          </View>
+        )}
+
+        {loadedTabs.community && (
+          <View
+            style={[
+              styles.tabLayer,
+              activeTab === 'community' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
+            ]}
+            pointerEvents={activeTab === 'community' ? 'auto' : 'none'}
+          >
+            <MemoCommunityScreen
+              onSelectPaper={handleSelectPaper}
+              pendingCommunityId={pendingCommunityId}
+              onClearPendingCommunity={() => setPendingCommunityId(null)}
+            />
+          </View>
+        )}
+
+        {loadedTabs.settings && (
+          <View
+            style={[
+              styles.tabLayer,
+              activeTab === 'settings' ? styles.activeTabLayer : styles.hiddenTabLayer,
+              { backgroundColor: colors.background },
+            ]}
+            pointerEvents={activeTab === 'settings' ? 'auto' : 'none'}
+          >
+            <MemoSettingsScreen />
+          </View>
+        )}
+      </View>
 
       {/* Bottom Navigation Bar */}
       <View style={[
         styles.bottomNav,
         {
-          paddingBottom: insets.bottom > 0 ? insets.bottom : 8,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 10,
           backgroundColor: colors.card,
-          borderTopColor: colors.border
+          borderTopColor: theme === 'dark' ? colors.border : '#EEF2F6',
         }
       ]}>
         {[
@@ -115,23 +240,28 @@ export const AppNavigator: React.FC = () => {
           { tab: 'settings', label: 'Settings', Icon: Settings },
         ].map(({ tab, label, Icon }) => {
           const isActive = activeTab === tab;
+          const scale = tabScales[tab as TabName];
           return (
             <TouchableOpacity
               key={tab}
               style={styles.navTab}
-              onPress={() => setActiveTab(tab as TabName)}
+              onPress={() => handleTabChange(tab as TabName)}
               activeOpacity={0.7}
+              delayPressIn={0}
             >
-              <View style={[
+              <Animated.View style={[
                 styles.iconContainer,
-                isActive && { backgroundColor: colors.primary + '20' }
+                { transform: [{ scale }] },
+                isActive && {
+                  backgroundColor: theme === 'dark' ? '#1E3A8A' : '#DBEAFE',
+                }
               ]}>
                 <Icon
                   size={20}
                   color={isActive ? colors.primary : colors.textMuted}
-                  strokeWidth={isActive ? 2.4 : 1.8}
+                  strokeWidth={isActive ? 2.4 : 1.9}
                 />
-              </View>
+              </Animated.View>
               <Text
                 style={[
                   styles.navLabel,
@@ -150,6 +280,8 @@ export const AppNavigator: React.FC = () => {
       <Modal
         visible={!!selectedPaperId}
         animationType="slide"
+        hardwareAccelerated={true}
+        statusBarTranslucent={true}
         onRequestClose={() => setSelectedPaperId(null)}
       >
         <PaperDetailModalScreen
@@ -164,53 +296,65 @@ export const AppNavigator: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#EAF2FB',
   },
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#EAF2FB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   loadingText: {
-    color: '#94a3b8',
+    color: '#64748B',
     fontSize: 16,
     fontWeight: '600',
   },
   screenContainer: {
     flex: 1,
   },
+  tabLayer: {
+    ...StyleSheet.absoluteFill,
+    overflow: 'hidden',
+  },
+  activeTabLayer: {
+    display: 'flex',
+    zIndex: 1,
+  },
+  hiddenTabLayer: {
+    display: 'none',
+    zIndex: 0,
+  },
   bottomNav: {
     flexDirection: 'row',
-    backgroundColor: '#1e293b',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderColor: '#334155',
-    paddingTop: 10,
+    borderColor: '#EEF2F6',
+    paddingTop: 4,
     paddingHorizontal: 6,
     justifyContent: 'space-around',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 4,
   },
   navTab: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
-    minWidth: 60,
+    paddingVertical: 1,
+    minWidth: 54,
   },
   iconContainer: {
-    paddingHorizontal: 14,
-    paddingVertical: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 3,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
+    marginBottom: 1,
   },
   navLabel: {
-    color: '#64748b',
-    fontSize: 10.5,
+    fontSize: 10,
     fontWeight: '500',
     letterSpacing: 0.1,
-  },
-  navLabelActive: {
-    color: '#38bdf8',
-    fontWeight: '700',
   },
 });

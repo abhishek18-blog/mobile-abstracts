@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { UserProfile } from '../types';
 import { userApi } from '../services/api';
+import { notificationService } from '../services/notificationService';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -71,12 +72,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await AsyncStorage.setItem('token', newToken);
     await AsyncStorage.setItem('user_profile', JSON.stringify(newUser));
     await AsyncStorage.removeItem('isGuest');
+
+    // Immediately cache interests so AppNavigator never re-prompts an existing user
+    if (newUser.hasSelectedInterests || (newUser.interests && newUser.interests.length > 0)) {
+      await AsyncStorage.setItem('user_interests_selected', 'true');
+      if (newUser.interests && newUser.interests.length > 0) {
+        await AsyncStorage.setItem('user_interests', JSON.stringify(newUser.interests));
+      }
+    }
+
     setToken(newToken);
     setUser(newUser);
     setIsGuest(false);
   };
 
   const logout = async () => {
+    await notificationService.unregisterPushToken();
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('user_profile');
     await AsyncStorage.removeItem('isGuest');

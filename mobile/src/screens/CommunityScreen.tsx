@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   TextInput,
   Alert,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ScrollView,
+  Animated,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Users,
   Plus,
@@ -35,17 +37,30 @@ import {
   Crown,
   UserCheck,
   UserMinus,
+  MoreVertical,
+  Sparkles,
+  Compass,
+  FlaskConical,
+  Brain,
 } from 'lucide-react-native';
 import { Community, CommunityPost, Paper, CommunityMemberInfo } from '../types';
 import { communityApi, papersApi, cachePapers, OFFLINE_SAVED_PAPERS_KEY } from '../services/api';
+import { getSocket } from '../services/socketService';
 import { encryptionService } from '../services/encryptionService';
 import { notificationService } from '../services/notificationService';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { PaperCard } from '../components/PaperCard';
+import { CommunitiesIllustration } from '../components/HeaderIllustrations';
+
+const OFFLINE_COMMUNITIES_KEY = 'offline_communities';
+const OFFLINE_COMMUNITY_DETAIL_PREFIX = 'offline_community_detail_';
+const SEEN_COMMUNITY_POSTS_KEY = 'seen_community_posts_ids';
 
 interface CommunityScreenProps {
   onSelectPaper?: (paperId: string) => void;
+  pendingCommunityId?: string | null;
+  onClearPendingCommunity?: () => void;
 }
 
 const AVATAR_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ec4899', '#06b6d4'];
@@ -53,6 +68,43 @@ const getAvatarColor = (id: string) => {
   let hash = 0;
   for (let i = 0; i < (id || '').length; i++) hash = (hash << 5) - hash + id.charCodeAt(i);
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+};
+
+const getCommunityIconConfig = (name: string, subject?: string, iconStr?: string, isDark?: boolean) => {
+  const s = `${name} ${subject || ''} ${iconStr || ''}`.toLowerCase();
+  if (s.includes('astro') || s.includes('space') || s.includes('telescope') || s.includes('physic')) {
+    return {
+      bg: isDark ? 'rgba(59, 130, 246, 0.22)' : '#DBEAFE',
+      color: isDark ? '#60A5FA' : '#2563EB',
+      Icon: Compass,
+    };
+  }
+  if (s.includes('chem') || s.includes('bio') || s.includes('flask') || s.includes('nano') || s.includes('reaction') || s.includes('lab')) {
+    return {
+      bg: isDark ? 'rgba(16, 185, 129, 0.22)' : '#D1FAE5',
+      color: isDark ? '#34D399' : '#059669',
+      Icon: FlaskConical,
+    };
+  }
+  if (s.includes('abstract') || s.includes('communit') || s.includes('dhempe') || s.includes('group') || s.includes('team')) {
+    return {
+      bg: isDark ? 'rgba(139, 92, 246, 0.22)' : '#EDE9FE',
+      color: isDark ? '#A78BFA' : '#7C3AED',
+      Icon: Users,
+    };
+  }
+  if (s.includes('qualcom') || s.includes('ai') || s.includes('deep') || s.includes('learn') || s.includes('brain')) {
+    return {
+      bg: isDark ? 'rgba(239, 68, 68, 0.22)' : '#FEE2E2',
+      color: isDark ? '#F87171' : '#DC2626',
+      Icon: Brain,
+    };
+  }
+  return {
+    bg: isDark ? 'rgba(249, 115, 22, 0.22)' : '#FFEDD5',
+    color: isDark ? '#FB923C' : '#EA580C',
+    Icon: Brain,
+  };
 };
 
 // Format realtime timestamp matching WhatsApp (e.g. 2:37 pm)
@@ -72,9 +124,231 @@ const sortPostsChronological = (posts: CommunityPost[]): CommunityPost[] => {
   return [...posts].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
 };
 
-export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper }) => {
+// Persist community detail + messages + attached papers to AsyncStorage for offline/instant load
+const persistCommunityDetailCache = (community: Community) => {
+  if (!community?.id) return;
+  const cacheablePosts = (community.posts || []).filter(p => p.status !== 'sending');
+  const payload: Community = { ...community, posts: cacheablePosts };
+  AsyncStorage.setItem(`${OFFLINE_COMMUNITY_DETAIL_PREFIX}${community.id}`, JSON.stringify(payload)).catch(() => {});
+
+  const attachedPapers = cacheablePosts.flatMap(p => p.papers || []).filter(Boolean) as Paper[];
+  if (attachedPapers.length > 0) {
+    cachePapers(attachedPapers);
+  }
+};
+
+interface MessageBubbleProps {
+  item: CommunityPost;
+  isOwnMessage: boolean;
+  userAvatarInitials: string;
+  colors: any;
+  primaryBtnTextColor: string;
+  onRetry: (post: CommunityPost) => void;
+  onDelete: (postId: string) => void;
+  onSelectPaper?: (paperId: string) => void;
+  onToggleSavePaper: (paperId: string) => void;
+}
+
+const MessageBubbleItem = React.memo<MessageBubbleProps>(({
+  item,
+  isOwnMessage,
+  userAvatarInitials,
+  colors,
+  primaryBtnTextColor,
+  onRetry,
+  onDelete,
+  onSelectPaper,
+  onToggleSavePaper,
+}) => (
+  <View style={[
+    styles.messageRow,
+    isOwnMessage ? styles.messageRowRight : styles.messageRowLeft,
+  ]}>
+    {!isOwnMessage && (
+      <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
+          {item.author?.avatar_initials || 'U'}
+        </Text>
+      </View>
+    )}
+
+    <TouchableOpacity
+      activeOpacity={isOwnMessage ? 0.7 : 1}
+      onPress={() => item.status === 'failed' && onRetry(item)}
+      onLongPress={() => isOwnMessage && onDelete(item.id)}
+      style={[
+        styles.messageBubble,
+        isOwnMessage
+          ? [styles.messageBubbleSent, { backgroundColor: item.status === 'failed' ? '#B91C1C' : colors.primary }]
+          : [styles.messageBubbleReceived, { backgroundColor: colors.card, borderColor: colors.border }],
+      ]}
+    >
+      {!isOwnMessage && (
+        <View style={styles.bubbleHeader}>
+          <Text style={[styles.authorName, { color: colors.text }]}>
+            {item.author?.name || 'Researcher'}
+          </Text>
+          <Text style={[styles.authorRole, { color: colors.textMuted }]}>
+            {item.author?.role || 'Member'}
+          </Text>
+        </View>
+      )}
+
+      {item.content ? (
+        <Text style={[
+          styles.postContent,
+          isOwnMessage ? { color: primaryBtnTextColor } : { color: colors.text },
+        ]}>
+          {item.content}
+        </Text>
+      ) : null}
+
+      <View style={[styles.bubbleFooter, isOwnMessage ? styles.bubbleFooterSent : styles.bubbleFooterReceived]}>
+        {item.isE2EE && (
+          <View style={styles.e2eeRow}>
+            <Lock size={9} color={isOwnMessage ? primaryBtnTextColor : colors.textMuted} style={{ opacity: 0.65 }} />
+          </View>
+        )}
+        <Text style={[styles.messageTimestamp, { color: isOwnMessage ? primaryBtnTextColor : colors.textMuted, opacity: 0.8 }]}>
+          {formatMessageTime(item.created_at)}
+        </Text>
+        {isOwnMessage && (
+          item.status === 'failed' ? (
+            <Text style={[styles.messageTimestamp, { color: primaryBtnTextColor, marginLeft: 4, fontWeight: '600' }]}>
+              · Failed (Tap to retry)
+            </Text>
+          ) : item.status === 'sending' ? (
+            <Check size={13} color={primaryBtnTextColor} style={{ opacity: 0.65, marginLeft: 3 }} />
+          ) : (
+            <CheckCheck size={13} color={primaryBtnTextColor} style={{ opacity: 0.85, marginLeft: 3 }} />
+          )
+        )}
+      </View>
+
+      {item.papers && item.papers.length > 0 && item.papers[0] && (
+        <View style={styles.attachedPaperWrapper}>
+          <PaperCard
+            paper={item.papers[0]}
+            onPress={() => {
+              if (item.papers && item.papers[0]) {
+                cachePapers([item.papers[0]]);
+              }
+              if (onSelectPaper && item.papers && item.papers[0]) {
+                onSelectPaper(item.papers[0].id);
+              }
+            }}
+            onToggleSave={() => onToggleSavePaper(item.papers![0].id)}
+          />
+        </View>
+      )}
+    </TouchableOpacity>
+
+    {isOwnMessage && (
+      <View style={[styles.avatar, { backgroundColor: colors.primary, marginLeft: 8, marginRight: 0 }]}>
+        <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
+          {userAvatarInitials}
+        </Text>
+      </View>
+    )}
+  </View>
+));
+
+interface CommunityCardItemProps {
+  item: Community;
+  isAdmin: boolean;
+  colors: any;
+  theme: string;
+  onPress: (c: Community) => void;
+  onOptions: (c: Community) => void;
+}
+
+const CommunityCardItem = React.memo<CommunityCardItemProps>(({
+  item,
+  isAdmin,
+  colors,
+  theme,
+  onPress,
+  onOptions,
+}) => {
+  const iconConfig = getCommunityIconConfig(item.name, item.subject, item.icon, theme === 'dark');
+  const ItemIcon = iconConfig.Icon;
+
+  return (
+    <TouchableOpacity
+      style={[
+        styles.communityCard,
+        {
+          backgroundColor: colors.card,
+          borderColor: theme === 'dark' ? colors.border : '#EDF2F9',
+        },
+      ]}
+      onPress={() => onPress(item)}
+      activeOpacity={0.85}
+    >
+      <View style={[styles.communityAvatar, { backgroundColor: iconConfig.bg }]}>
+        <ItemIcon size={24} color={iconConfig.color} strokeWidth={2} />
+      </View>
+
+      <View style={styles.communityDetails}>
+        <View style={styles.communityTitleRow}>
+          <Text
+            style={[styles.communityName, { color: colors.text }]}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {item.name}
+          </Text>
+          {isAdmin && (
+            <View style={styles.adminHeaderBadge}>
+              <Shield size={10} color="#2563EB" fill="#2563EB" />
+              <Text style={styles.adminHeaderBadgeText}>Admin</Text>
+            </View>
+          )}
+        </View>
+
+        <Text style={[styles.communitySnippet, { color: colors.textMuted }]} numberOfLines={1}>
+          {item.description || item.subject || 'Tap to enter group chat'}
+        </Text>
+      </View>
+
+      <View style={styles.communityRightCol}>
+        <View style={styles.communityMetaRow}>
+          {item.isMember && <View style={styles.isMemberDot} />}
+          <Text style={[styles.communityMeta, { color: colors.textMuted }]}>
+            {item.memberCount || 1} {item.memberCount === 1 ? 'member' : 'members'}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.threeDotsBtn,
+            {
+              backgroundColor: theme === 'dark' ? '#24324D' : '#F1F5F9',
+              borderColor: theme === 'dark' ? '#334155' : '#E2E8F0',
+            },
+          ]}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          onPress={(e) => {
+            e.stopPropagation();
+            onOptions(item);
+          }}
+          activeOpacity={0.7}
+        >
+          <MoreVertical size={16} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+export const CommunityScreen: React.FC<CommunityScreenProps> = ({
+  onSelectPaper,
+  pendingCommunityId,
+  onClearPendingCommunity,
+}) => {
   const { colors, theme } = useTheme();
   const { user, isGuest, logout } = useAuth();
+  const insets = useSafeAreaInsets();
   
   // State
   const [communities, setCommunities] = useState<Community[]>([]);
@@ -119,11 +393,61 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   // Refs for auto-scroll and tracking received messages for notifications
   const flatListRef = useRef<FlatList<CommunityPost>>(null);
+  const isNearBottomRef = useRef(true);
   const seenPostIdsRef = useRef<Set<string>>(new Set());
+  const initialSyncDoneRef = useRef(false);
+  const chatTransitionAnim = useRef(new Animated.Value(0)).current;
 
-  // Initialize notification service on mount
+  // Track active open community so foreground notifications don't fire for the chat user is reading
+  useEffect(() => {
+    notificationService.setActiveCommunityId(selectedCommunity?.id ? String(selectedCommunity.id) : null);
+    return () => {
+      notificationService.setActiveCommunityId(null);
+    };
+  }, [selectedCommunity?.id]);
+
+  // Open community directly when user taps a push notification
+  useEffect(() => {
+    if (pendingCommunityId && !isGuest) {
+      selectCommunityWithDetails(pendingCommunityId);
+      onClearPendingCommunity?.();
+    }
+  }, [pendingCommunityId, isGuest]);
+
+  // Smoothly scroll to bottom when keyboard opens inside a chat
+  useEffect(() => {
+    if (!selectedCommunity) return;
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (isNearBottomRef.current) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 60);
+      }
+    });
+    return () => sub.remove();
+  }, [selectedCommunity?.id]);
+
+  const handleBackFromChat = () => {
+    Animated.timing(chatTransitionAnim, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(() => setSelectedCommunity(null));
+  };
+
+  // Initialize notification service and restore persisted seen post IDs on mount
   useEffect(() => {
     notificationService.initialize();
+    AsyncStorage.getItem(SEEN_COMMUNITY_POSTS_KEY).then(raw => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((id: string) => seenPostIdsRef.current.add(id));
+          }
+        } catch {}
+      }
+    }).catch(() => {});
   }, []);
 
   // Determine whether current logged-in user is an admin of the active community
@@ -161,6 +485,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     );
   };
 
+  const mergeWithPendingPosts = (serverPosts: CommunityPost[], existingPosts: CommunityPost[] = []): CommunityPost[] => {
+    const pending = existingPosts.filter(p => p.status === 'sending' || p.status === 'failed');
+    if (pending.length === 0) return serverPosts;
+    const serverIds = new Set(serverPosts.map(p => p.id));
+    const remainingPending = pending.filter(p => !serverIds.has(p.id));
+    return sortPostsChronological([...serverPosts, ...remainingPending]);
+  };
+
   const selectCommunityWithDetails = async (communityId: string) => {
     if (isGuest) {
       promptGuestSignIn();
@@ -168,6 +500,25 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     }
 
     try {
+      // 1. Instant Cache Fallback: Load saved community details immediately
+      let loadedFromCache = false;
+      const cachedDetail = await AsyncStorage.getItem(`${OFFLINE_COMMUNITY_DETAIL_PREFIX}${communityId}`);
+      if (cachedDetail) {
+        try {
+          const parsed: Community = JSON.parse(cachedDetail);
+          if (parsed && parsed.id === communityId) {
+            loadedFromCache = true;
+            setSelectedCommunity(parsed);
+            chatTransitionAnim.setValue(1);
+            parsed.posts?.forEach((p) => seenPostIdsRef.current.add(p.id));
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }, 60);
+          }
+        } catch {}
+      }
+
+      // 2. Network Fetch: Fetch fresh data from server
       const res = await communityApi.getById(communityId);
       if (res.success && res.data) {
         const decryptedPosts = await decryptPosts(res.data.posts || [], communityId);
@@ -176,6 +527,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
         // Pre-populate seen IDs so device notifications don't fire for past messages
         sorted.forEach(p => seenPostIdsRef.current.add(p.id));
+        AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
 
         let members: CommunityMemberInfo[] = res.data.members || [];
         if (members.length === 0 && user) {
@@ -187,7 +539,19 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             community_role: (res.data.isAdmin || isCreator) ? 'admin' : 'member',
           }];
         }
-        setSelectedCommunity({ ...res.data, members, posts: sorted });
+        const updatedCommunity = { ...res.data, members, posts: mergeWithPendingPosts(sorted, selectedCommunity?.posts) };
+        setSelectedCommunity(updatedCommunity);
+        if (!loadedFromCache) {
+          chatTransitionAnim.setValue(0);
+          Animated.timing(chatTransitionAnim, {
+            toValue: 1,
+            duration: 180,
+            useNativeDriver: true,
+          }).start();
+        }
+
+        // Cache community detail + attached papers
+        persistCommunityDetailCache(updatedCommunity);
 
         // Scroll to the bottom showing the latest messages
         setTimeout(() => {
@@ -209,12 +573,38 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
 
   const fetchCommunities = async () => {
     try {
+      // 1. Instant offline cache load
+      const cached = await AsyncStorage.getItem(OFFLINE_COMMUNITIES_KEY);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setCommunities(parsed);
+            setLoading(false);
+          }
+        } catch {}
+      }
+
+      // 2. Fresh network fetch
       const res = await communityApi.getAll();
       if (res.success && res.data) {
         // Sanitize out any legacy mock comm- entries
         const valid = res.data.filter(c => c && c.id && !c.id.startsWith('comm-'));
         const listToUse = valid.length > 0 ? valid : res.data;
         setCommunities(listToUse);
+        await AsyncStorage.setItem(OFFLINE_COMMUNITIES_KEY, JSON.stringify(listToUse));
+
+        // Initial seed of posts to prevent any historical notifications
+        if (!initialSyncDoneRef.current) {
+          const joined = listToUse.filter(c => c.isMember);
+          for (const comm of joined) {
+            if (comm.posts) {
+              comm.posts.forEach(p => seenPostIdsRef.current.add(p.id));
+            }
+          }
+          await AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current)));
+          initialSyncDoneRef.current = true;
+        }
 
         // If a community was ALREADY open and user is not a guest, refresh its details
         if (selectedCommunity && !isGuest) {
@@ -236,7 +626,80 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     fetchCommunities();
   }, []);
 
-  // Poll for new messages every 3 seconds to keep chat real-time (when inside a chat & not guest)
+  // Real-time WebSocket delivery (Socket.IO) for instant message push
+  useEffect(() => {
+    if (isGuest || !selectedCommunity?.id || selectedCommunity.id.startsWith('comm-')) return;
+
+    const commId = String(selectedCommunity.id);
+    let active = true;
+    let activeSocket: Awaited<ReturnType<typeof getSocket>> = null;
+
+    const handleNewPost = async (incomingPost: CommunityPost) => {
+      if (!active || !incomingPost) return;
+      const postId = String(incomingPost.id || (incomingPost as any)._id || '');
+      if (!postId) return;
+
+      // Skip if we already have this post (e.g. our own optimistic post just resolved)
+      if (seenPostIdsRef.current.has(postId)) return;
+      seenPostIdsRef.current.add(postId);
+      AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
+
+      const [decrypted] = await decryptPosts([{ ...incomingPost, id: postId }], commId);
+      if (!active) return;
+
+      setSelectedCommunity(prev => {
+        if (!prev || String(prev.id) !== commId) return prev;
+        const existing = prev.posts || [];
+        if (existing.some(p => p.id === postId)) return prev;
+        const nextCommunity = {
+          ...prev,
+          posts: sortPostsChronological([...existing, decrypted]),
+        };
+        persistCommunityDetailCache(nextCommunity);
+        return nextCommunity;
+      });
+
+      if (isNearBottomRef.current) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 60);
+      }
+    };
+
+    const handleDeletePostEvent = (payload: { communityId?: string; postId?: string }) => {
+      if (!active || !payload?.postId) return;
+      if (payload.communityId && String(payload.communityId) !== commId) return;
+
+      setSelectedCommunity(prev => {
+        if (!prev || String(prev.id) !== commId) return prev;
+        const nextCommunity = {
+          ...prev,
+          posts: (prev.posts || []).filter(p => p.id !== payload.postId),
+        };
+        persistCommunityDetailCache(nextCommunity);
+        return nextCommunity;
+      });
+    };
+
+    getSocket().then((sock) => {
+      if (!active || !sock) return;
+      activeSocket = sock;
+      sock.emit('join_community', commId);
+      sock.on('new_post', handleNewPost);
+      sock.on('delete_post', handleDeletePostEvent);
+    });
+
+    return () => {
+      active = false;
+      if (activeSocket) {
+        activeSocket.emit('leave_community', commId);
+        activeSocket.off('new_post', handleNewPost);
+        activeSocket.off('delete_post', handleDeletePostEvent);
+      }
+    };
+  }, [selectedCommunity?.id, isGuest]);
+
+  // Fallback sync every 15 seconds in case WebSocket temporarily disconnects
   useEffect(() => {
     if (isGuest || !selectedCommunity || !selectedCommunity.id || selectedCommunity.id.startsWith('comm-')) return;
 
@@ -258,34 +721,26 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           const newUnseen = rawPosts.filter(p => !seenPostIdsRef.current.has(p.id));
 
           if (newUnseen.length > 0) {
-            const decryptedUnseen = await decryptPosts(newUnseen, selectedCommunity.id);
+            // Mark all as seen so they are never notified
+            newUnseen.forEach(p => seenPostIdsRef.current.add(p.id));
+            AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
 
-            // Send push notification to user device if sent by another participant!
-            decryptedUnseen.forEach(p => {
-              seenPostIdsRef.current.add(p.id);
-              const isOwnMessage =
-                p.author?.avatar_initials === 'ME' ||
-                p.author?.name === 'You (Researcher)' ||
-                (user && p.author?.name === user.name) ||
-                (user && p.user_id === user.id);
-
-              if (!isOwnMessage) {
-                notificationService.sendCommunityMessageNotification({
-                  communityName: selectedCommunity.name,
-                  senderName: p.author?.name || 'Researcher',
-                  content: p.content,
-                  communityId: selectedCommunity.id,
-                  hasAttachment: !!(p.papers && p.papers.length > 0),
-                });
-              }
-            });
+            // NOTE: Do NOT send external push notification for the chat room user is actively viewing!
+            // The user is literally right here watching the conversation in real time.
 
             const allDecrypted = await decryptPosts(rawPosts, selectedCommunity.id);
             const chronological = sortPostsChronological(allDecrypted);
-            setSelectedCommunity(prev => (prev ? { ...prev, ...res.data, posts: chronological } : null));
+            setSelectedCommunity(prev => {
+              if (!prev) return null;
+              const nextCommunity = { ...prev, ...res.data, posts: mergeWithPendingPosts(chronological, prev.posts) };
+              persistCommunityDetailCache(nextCommunity);
+              return nextCommunity;
+            });
 
             setTimeout(() => {
-              flatListRef.current?.scrollToEnd({ animated: true });
+              if (isNearBottomRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: true });
+              }
             }, 100);
           }
         } else {
@@ -295,7 +750,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
         consecutiveErrors++;
         console.warn('Failed to poll community posts:', err);
       }
-    }, 3000);
+    }, 15000);
 
     return () => clearInterval(pollInterval);
   }, [selectedCommunity?.id, isGuest, user]);
@@ -305,6 +760,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     if (isGuest || selectedCommunity) return;
 
     const bgInterval = setInterval(async () => {
+      // ONLY check if initial sync has already seeded historical messages
+      if (!initialSyncDoneRef.current) return;
+
       try {
         const res = await communityApi.getAll();
         if (res.success && res.data) {
@@ -315,6 +773,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               const unseen = detailRes.data.posts.filter(p => !seenPostIdsRef.current.has(p.id));
               if (unseen.length > 0) {
                 const decrypted = await decryptPosts(unseen, comm.id);
+                let newlyNotified = false;
                 decrypted.forEach(p => {
                   seenPostIdsRef.current.add(p.id);
                   const isOwn =
@@ -322,7 +781,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                     p.author?.name === 'You (Researcher)' ||
                     (user && p.author?.name === user.name) ||
                     (user && p.user_id === user.id);
+                  
+                  // Only notify if truly from someone else and user is not inside this community
                   if (!isOwn) {
+                    newlyNotified = true;
                     notificationService.sendCommunityMessageNotification({
                       communityName: comm.name,
                       senderName: p.author?.name || 'Researcher',
@@ -332,12 +794,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                     });
                   }
                 });
+
+                if (newlyNotified) {
+                  AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
+                }
               }
             }
           }
         }
       } catch {}
-    }, 8000);
+    }, 15000);
 
     return () => clearInterval(bgInterval);
   }, [isGuest, selectedCommunity, user]);
@@ -363,6 +829,70 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     }
   };
 
+  const handleCommunityOptions = (item: Community) => {
+    if (isGuest) {
+      promptGuestSignIn(item.name);
+      return;
+    }
+
+    if (item.isMember) {
+      Alert.alert(
+        item.name,
+        `You are a member (${item.memberCount || 1} ${item.memberCount === 1 ? 'member' : 'members'})`,
+        [
+          { text: 'Open Chat', onPress: () => handleCommunityPress(item) },
+          {
+            text: 'Leave Community',
+            style: 'destructive',
+            onPress: () => handleJoin(item.id),
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    } else {
+      Alert.alert(
+        item.name,
+        `${item.description || item.subject || 'Research Community'}\n(${item.memberCount || 1} ${item.memberCount === 1 ? 'member' : 'members'})`,
+        [
+          { text: 'Join Community', onPress: () => handleJoin(item.id) },
+          { text: 'Preview Chat', onPress: () => handleCommunityPress(item) },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    }
+  };
+
+  const handleChatOptions = () => {
+    if (!selectedCommunity) return;
+    if (isGuest) {
+      promptGuestSignIn(selectedCommunity.name);
+      return;
+    }
+
+    const isMember = selectedCommunity.isMember;
+    const options: { text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }[] = [
+      {
+        text: 'Group Info',
+        onPress: () => setIsInfoModalOpen(true),
+      },
+      {
+        text: isMember ? 'Leave Community' : 'Join Community',
+        style: isMember ? 'destructive' : 'default',
+        onPress: () => handleJoin(selectedCommunity.id),
+      },
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+    ];
+
+    Alert.alert(
+      selectedCommunity.name,
+      `${selectedCommunity.memberCount || 1} ${selectedCommunity.memberCount === 1 ? 'member' : 'members'} · ${selectedCommunity.subject || 'Research Group'}`,
+      options
+    );
+  };
+
   const handleCreateGroup = async () => {
     if (isGuest) {
       promptGuestSignIn();
@@ -382,29 +912,42 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
         icon: groupIcon,
       });
 
-      if (res.success) {
+      if (res.success && res.data) {
+        const rawId = String(res.data.id || (res.data as any)._id || `comm-${Date.now()}`);
         setGroupName('');
         setGroupDesc('');
         setGroupSubject('Computer Science');
         setGroupIcon('🔬');
         setIsGroupModalOpen(false);
+
+        const newCommData: Community = {
+          ...res.data,
+          id: rawId,
+          isAdmin: true,
+          isMember: true,
+          created_by: user?.id,
+          memberCount: res.data.memberCount || 1,
+          members: user ? [{
+            id: user.id,
+            name: user.name || 'You',
+            avatar_initials: user.avatar_initials || 'ME',
+            community_role: 'admin',
+          }] : [],
+          posts: [],
+        };
+
+        // Cache the newly created community immediately
+        AsyncStorage.setItem(`${OFFLINE_COMMUNITY_DETAIL_PREFIX}${rawId}`, JSON.stringify(newCommData)).catch(() => {});
+
+        setSelectedCommunity(newCommData);
+        chatTransitionAnim.setValue(0);
+        Animated.timing(chatTransitionAnim, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }).start();
+
         await fetchCommunities();
-        
-        // Set active to the new one with creator having admin privileges
-        if (res.data) {
-          const newCommData: Community = {
-            ...res.data,
-            isAdmin: true,
-            created_by: user?.id,
-            members: user ? [{
-              id: user.id,
-              name: user.name || 'You',
-              avatar_initials: user.avatar_initials || 'ME',
-              community_role: 'admin',
-            }] : [],
-          };
-          setSelectedCommunity(newCommData);
-        }
         Alert.alert('Success', 'Research group created successfully!');
       } else {
         Alert.alert('Error', res.error || 'Failed to create research group.');
@@ -556,6 +1099,95 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     setIsPaperSelectorOpen(false);
   };
 
+  const transmitPost = async (
+    commId: string,
+    tempPostId: string,
+    typedContent: string,
+    paperIds: string[],
+    papersAttached: Paper[]
+  ) => {
+    const maxAttempts = 3;
+    let lastError = 'Failed to post message.';
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // 🔒 End-to-End Encryption: Encrypt message content with AES-256-GCM before transmitting
+        const encryptedContent = await encryptionService.encryptCommunityMessage(typedContent, commId);
+        const res = await communityApi.createPost(commId, {
+          content: encryptedContent,
+          paper_ids: paperIds,
+        });
+
+        if (res.success && res.data) {
+          const realPostId = String(res.data.id || (res.data as any)._id || tempPostId);
+          seenPostIdsRef.current.add(realPostId);
+          AsyncStorage.setItem(SEEN_COMMUNITY_POSTS_KEY, JSON.stringify(Array.from(seenPostIdsRef.current))).catch(() => {});
+
+          setSelectedCommunity(prev => {
+            if (!prev) return null;
+            const nextCommunity: Community = {
+              ...prev,
+              posts: (prev.posts || []).map(p => p.id === tempPostId ? {
+                ...res.data,
+                id: realPostId,
+                content: typedContent,
+                isE2EE: true,
+                status: 'sent' as const,
+                papers: papersAttached.length > 0 ? papersAttached : (res.data.papers || []),
+              } : p)
+            };
+            persistCommunityDetailCache(nextCommunity);
+            return nextCommunity;
+          });
+
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 50);
+          return;
+        }
+
+        lastError = res.error || lastError;
+        // Don't retry client validation/auth errors (400/403/404)
+        if (/required|characters|join this community|not found|unauthorized/i.test(lastError)) {
+          break;
+        }
+      } catch (err: any) {
+        lastError = err?.message || lastError;
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+      }
+    }
+
+    // Keep message visible as 'failed' so the user can tap to retry instead of losing it
+    setSelectedCommunity(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        posts: (prev.posts || []).map(p => p.id === tempPostId ? { ...p, status: 'failed' } : p)
+      };
+    });
+    Alert.alert('Message Not Sent', `${lastError} Tap the failed message to retry.`);
+  };
+
+  const handleRetryPost = async (post: CommunityPost) => {
+    if (!selectedCommunity || post.status !== 'failed') return;
+    const commId = String(selectedCommunity.id || (selectedCommunity as any)._id || '');
+    if (!commId) return;
+
+    setSelectedCommunity(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        posts: (prev.posts || []).map(p => p.id === post.id ? { ...p, status: 'sending' } : p)
+      };
+    });
+
+    const paperIds = (post.papers || []).map(p => p.id);
+    await transmitPost(commId, post.id, post.content, paperIds, post.papers || []);
+  };
+
   const handleSendPost = async () => {
     if (isGuest) {
       promptGuestSignIn(selectedCommunity?.name);
@@ -568,6 +1200,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     }
     if (!selectedCommunity) return;
 
+    const commId = String(selectedCommunity.id || (selectedCommunity as any)._id || '');
+    if (!commId) {
+      Alert.alert('Error', 'Community ID is missing. Please re-open the community.');
+      return;
+    }
+
     const tempPostId = `temp-${Date.now()}`;
     const papersAttached = attachedPaper ? [attachedPaper] : [];
 
@@ -579,6 +1217,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       created_at: new Date().toISOString(),
       papers: papersAttached,
       isE2EE: true,
+      status: 'sending',
     };
 
     // Mark temp ID as seen so notification is never self-triggered
@@ -604,56 +1243,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
     setPostContent('');
     setAttachedPaper(null);
 
-    try {
-      // 🔒 End-to-End Encryption: Encrypt message content with AES-256-GCM before transmitting
-      const encryptedContent = await encryptionService.encryptCommunityMessage(typedContent, selectedCommunity.id);
-
-      const res = await communityApi.createPost(selectedCommunity.id, {
-        content: encryptedContent,
-        paper_ids: paperIds,
-      });
-
-      if (!res.success) {
-        // Revert optimistic update on failure
-        setSelectedCommunity(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            posts: (prev.posts || []).filter(p => p.id !== tempPostId)
-          };
-        });
-        Alert.alert('Error', res.error || 'Failed to post message.');
-      } else {
-        // Swap out the temp post with the real one returned from server (using decrypted text locally)
-        seenPostIdsRef.current.add(res.data.id);
-        setSelectedCommunity(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            posts: (prev.posts || []).map(p => p.id === tempPostId ? { ...res.data, content: typedContent, isE2EE: true } : p)
-          };
-        });
-
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 50);
-      }
-    } catch (err: any) {
-      // Revert optimistic update on error
-      setSelectedCommunity(prev => {
-        if (!prev) return null;
-        return {
-          ...prev,
-          posts: (prev.posts || []).filter(p => p.id !== tempPostId)
-        };
-      });
-      Alert.alert('Error', err.message || 'An error occurred.');
-    }
+    await transmitPost(commId, tempPostId, typedContent, paperIds, papersAttached);
   };
 
   const handleToggleSavePaper = async (paperId: string) => {
     try {
-      const res = await papersApi.toggleSave(paperId);
+      const paperObj = selectedCommunity?.posts?.flatMap(p => p.papers || []).find(p => p.id === paperId);
+      const res = await papersApi.toggleSave(paperId, paperObj);
       if (res.success && res.data && selectedCommunity) {
         const updatedPosts = (selectedCommunity.posts || []).map((post) => {
           if (post.papers && post.papers.length > 0 && post.papers[0].id === paperId) {
@@ -688,10 +1284,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             // Only hide locally
             setSelectedCommunity(prev => {
               if (!prev) return prev;
-              return {
+              const nextCommunity = {
                 ...prev,
                 posts: prev.posts?.filter(p => p.id !== postId)
               };
+              persistCommunityDetailCache(nextCommunity);
+              return nextCommunity;
             });
           }
         },
@@ -702,13 +1300,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             try {
               // Delete from server
               await communityApi.deletePost(selectedCommunity.id, postId);
-              // Update local state
+              // Update local state & cache
               setSelectedCommunity(prev => {
                 if (!prev) return prev;
-                return {
+                const nextCommunity = {
                   ...prev,
                   posts: prev.posts?.filter(p => p.id !== postId)
                 };
+                persistCommunityDetailCache(nextCommunity);
+                return nextCommunity;
               });
             } catch (err) {
               console.warn('Failed to delete post:', err);
@@ -722,24 +1322,74 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
   // Button text/icon dynamic styling matching black/white theme
   const primaryBtnTextColor = theme === 'dark' ? '#000000' : '#ffffff';
 
+  const renderMessageItem = useCallback(({ item }: { item: CommunityPost }) => {
+    const isOwnMessage =
+      item.author?.avatar_initials === 'ME' ||
+      item.author?.name === 'You (Researcher)' ||
+      (user && item.author?.name === user.name) ||
+      (user && item.user_id === user.id);
+
+    return (
+      <MessageBubbleItem
+        item={item}
+        isOwnMessage={Boolean(isOwnMessage)}
+        userAvatarInitials={user?.avatar_initials || 'ME'}
+        colors={colors}
+        primaryBtnTextColor={primaryBtnTextColor}
+        onRetry={handleRetryPost}
+        onDelete={handleDeletePost}
+        onSelectPaper={onSelectPaper}
+        onToggleSavePaper={handleToggleSavePaper}
+      />
+    );
+  }, [user, colors, primaryBtnTextColor, onSelectPaper]);
+
+  const renderCommunityItem = useCallback(({ item }: { item: Community }) => {
+    const isAdmin = Boolean(item.isAdmin || (user && String(item.created_by) === String(user.id)));
+    return (
+      <CommunityCardItem
+        item={item}
+        isAdmin={isAdmin}
+        colors={colors}
+        theme={theme}
+        onPress={handleCommunityPress}
+        onOptions={handleCommunityOptions}
+      />
+    );
+  }, [user, colors, theme]);
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
       {selectedCommunity ? (
         // ─────────────────────────────────────────────────────────────────────────────
         // 1. DEDICATED CHAT VIEW (Screen 2 in reference image)
         // ─────────────────────────────────────────────────────────────────────────────
-        <KeyboardAvoidingView 
-          style={{ flex: 1 }} 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 20}
+        <Animated.View
+          style={{
+            flex: 1,
+            opacity: chatTransitionAnim,
+            transform: [
+              {
+                translateX: chatTransitionAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [24, 0],
+                }),
+              },
+            ],
+          }}
         >
-          {/* Chat Header matching reference */}
-          <View style={[styles.chatHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-            <TouchableOpacity
-              style={styles.chatHeaderBackBtn}
-              onPress={() => setSelectedCommunity(null)}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
+          <KeyboardAvoidingView 
+            style={{ flex: 1 }} 
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          >
+            {/* Chat Header matching reference */}
+            <View style={[styles.chatHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+              <TouchableOpacity
+                style={styles.chatHeaderBackBtn}
+                onPress={handleBackFromChat}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
               <ArrowLeft size={22} color={colors.text} />
             </TouchableOpacity>
 
@@ -753,8 +1403,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               </View>
 
               <View style={styles.chatHeaderDetails}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={[styles.chatHeaderTitle, { color: colors.text }]} numberOfLines={1}>
+                <View style={styles.chatHeaderTitleRow}>
+                  <Text
+                    style={[styles.chatHeaderTitle, { color: colors.text }]}
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                  >
                     {selectedCommunity.name}
                   </Text>
                   {isCurrentUserAdmin && (
@@ -773,140 +1427,42 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               </View>
             </TouchableOpacity>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <TouchableOpacity
-                style={[styles.chatHeaderIconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => setIsInfoModalOpen(true)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Info size={17} color={colors.text} />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.chatHeaderJoinBtn,
-                  { backgroundColor: colors.primary },
-                  selectedCommunity.isMember && { backgroundColor: colors.border + '80' },
-                ]}
-                onPress={() => handleJoin(selectedCommunity.id)}
-              >
-                {selectedCommunity.isMember ? (
-                  <View style={styles.joinedPillContent}>
-                    <Check size={12} color={colors.text} />
-                    <Text style={[styles.chatHeaderJoinText, { color: colors.text, marginLeft: 3 }]}>Joined</Text>
-                  </View>
-                ) : (
-                  <Text style={[styles.chatHeaderJoinText, { color: primaryBtnTextColor }]}>Join</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+            {/* 3-Dots Menu Button: Contains Group Info, Join/Leave community */}
+            <TouchableOpacity
+              style={[styles.chatHeaderIconBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={handleChatOptions}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Group and Membership Options"
+            >
+              <MoreVertical size={19} color={colors.text} />
+            </TouchableOpacity>
           </View>
 
           {/* Posts List */}
           <FlatList<CommunityPost>
             ref={flatListRef}
             data={selectedCommunity.posts || []}
-            keyExtractor={(item: CommunityPost) => item.id}
+            keyExtractor={(item: CommunityPost, index: number) => (item?.id ? String(item.id) : `post-${index}`)}
+            initialNumToRender={15}
+            maxToRenderPerBatch={12}
+            windowSize={9}
+            removeClippedSubviews={Platform.OS === 'android'}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={100}
+            onScroll={(e) => {
+              const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+              isNearBottomRef.current = layoutMeasurement.height + contentOffset.y >= contentSize.height - 120;
+            }}
             onContentSizeChange={() => {
-              flatListRef.current?.scrollToEnd({ animated: false });
+              if (isNearBottomRef.current) {
+                flatListRef.current?.scrollToEnd({ animated: false });
+              }
             }}
             onLayout={() => {
               flatListRef.current?.scrollToEnd({ animated: false });
             }}
-            renderItem={({ item }: { item: CommunityPost }) => {
-              const isOwnMessage = 
-                item.author?.avatar_initials === 'ME' ||
-                item.author?.name === 'You (Researcher)' ||
-                (user && item.author?.name === user.name) ||
-                (user && item.user_id === user.id);
-
-              return (
-                <View style={[
-                  styles.messageRow,
-                  isOwnMessage ? styles.messageRowRight : styles.messageRowLeft,
-                ]}>
-                  {!isOwnMessage && (
-                    <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-                      <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
-                        {item.author?.avatar_initials || 'U'}
-                      </Text>
-                    </View>
-                  )}
-
-                  <TouchableOpacity 
-                    activeOpacity={isOwnMessage ? 0.7 : 1}
-                    onLongPress={() => isOwnMessage && handleDeletePost(item.id)}
-                    style={[
-                      styles.messageBubble,
-                      isOwnMessage
-                        ? [styles.messageBubbleSent, { backgroundColor: colors.primary }]
-                        : [styles.messageBubbleReceived, { backgroundColor: colors.card, borderColor: colors.border }],
-                    ]}
-                  >
-                    {!isOwnMessage && (
-                      <View style={styles.bubbleHeader}>
-                        <Text style={[styles.authorName, { color: colors.text }]}>
-                          {item.author?.name || 'Researcher'}
-                        </Text>
-                        <Text style={[styles.authorRole, { color: colors.textMuted }]}>
-                          {item.author?.role || 'Member'}
-                        </Text>
-                      </View>
-                    )}
-
-                    {item.content ? (
-                      <Text style={[
-                        styles.postContent,
-                        isOwnMessage ? { color: primaryBtnTextColor } : { color: colors.text },
-                      ]}>
-                        {item.content}
-                      </Text>
-                    ) : null}
-
-                    {/* WhatsApp Realtime Timing, E2EE Lock & Sent Checkmarks */}
-                    <View style={[styles.bubbleFooter, isOwnMessage ? styles.bubbleFooterSent : styles.bubbleFooterReceived]}>
-                      {item.isE2EE && (
-                        <View style={styles.e2eeRow}>
-                          <Lock size={9} color={isOwnMessage ? primaryBtnTextColor : colors.textMuted} style={{ opacity: 0.65 }} />
-                        </View>
-                      )}
-                      <Text style={[styles.messageTimestamp, { color: isOwnMessage ? primaryBtnTextColor : colors.textMuted, opacity: 0.8 }]}>
-                        {formatMessageTime(item.created_at)}
-                      </Text>
-                      {isOwnMessage && (
-                        <CheckCheck size={13} color={primaryBtnTextColor} style={{ opacity: 0.85, marginLeft: 3 }} />
-                      )}
-                    </View>
-
-                    {/* Attached Papers Display */}
-                    {item.papers && item.papers.length > 0 && (
-                      <View style={styles.attachedPaperWrapper}>
-                        <PaperCard
-                          paper={item.papers[0]}
-                          onPress={() => {
-                            if (item.papers && item.papers[0]) {
-                              cachePapers([item.papers[0]]);
-                            }
-                            if (onSelectPaper && item.papers && item.papers[0]) {
-                              onSelectPaper(item.papers[0].id);
-                            }
-                          }}
-                          onToggleSave={() => handleToggleSavePaper(item.papers![0].id)}
-                        />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-
-                  {isOwnMessage && (
-                    <View style={[styles.avatar, { backgroundColor: colors.primary, marginLeft: 8, marginRight: 0 }]}>
-                      <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
-                        {user?.avatar_initials || 'ME'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              );
-            }}
+            renderItem={renderMessageItem}
             contentContainerStyle={styles.postList}
             refreshControl={
               <RefreshControl
@@ -988,36 +1544,58 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             </View>
           )}
         </KeyboardAvoidingView>
+      </Animated.View>
       ) : (
         // ─────────────────────────────────────────────────────────────────────────────
         // 2. WHATSAPP-STYLE VERTICAL COMMUNITY LIST (Screen 1 in reference image)
         // ─────────────────────────────────────────────────────────────────────────────
         <View style={styles.verticalListWrapper}>
-          {/* Top Greeting Header */}
+          {/* Top Greeting Header matching 4.png */}
           <View style={styles.listHeaderContainer}>
-            <View>
+            <View style={{ flex: 1, paddingRight: 8, zIndex: 2 }}>
               <Text style={[styles.listHeaderGreeting, { color: colors.textMuted }]}>
-                Hello, {user?.name ? user.name.split(' ')[0] : (isGuest ? 'Guest' : 'Researcher')}
+                Hello, {user?.name ? user.name.split(' ')[0] : (isGuest ? 'Guest' : 'Abhishek')}
               </Text>
               <Text style={[styles.listHeaderTitle, { color: colors.text }]}>
                 Communities
+              </Text>
+              <Text style={[styles.listHeaderSubtitle, { color: colors.textMuted }]}>
+                Connect • Discuss • Grow
               </Text>
             </View>
 
             <View style={styles.listHeaderActions}>
               <TouchableOpacity
-                style={[styles.headerCircleBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                style={[
+                  styles.headerCircleBtn,
+                  {
+                    backgroundColor: colors.card,
+                    borderColor: theme === 'dark' ? colors.border : '#E2E8F0',
+                  }
+                ]}
                 onPress={() => setIsSearchVisible(!isSearchVisible)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                activeOpacity={0.8}
               >
-                <Search size={18} color={colors.text} />
+                <Search size={19} color={colors.primary} strokeWidth={2.2} />
               </TouchableOpacity>
+            </View>
+
+            {/* 3D Blue Community Avatars Illustration matching 4.png */}
+            <View style={styles.illustrationBackground}>
+              <CommunitiesIllustration size={110} />
             </View>
           </View>
 
           {/* Search Bar (Collapsible / Toggleable) */}
           {isSearchVisible && (
-            <View style={[styles.listSearchContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[
+              styles.listSearchContainer,
+              {
+                backgroundColor: colors.card,
+                borderColor: theme === 'dark' ? colors.border : '#E2E8F0',
+              }
+            ]}>
               <Search size={16} color={colors.textMuted} style={{ marginRight: 8 }} />
               <TextInput
                 style={[styles.listSearchInput, { color: colors.text }]}
@@ -1035,21 +1613,23 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             </View>
           )}
 
-          {/* Filter Pills ("All Groups", "Joined") matching reference */}
+          {/* Filter Pills ("All Groups", "Joined") matching 4.png */}
           <View style={styles.filterPillContainer}>
             <TouchableOpacity
               style={[
                 styles.filterPill,
                 filterTab === 'all'
-                  ? [styles.filterPillActive, { backgroundColor: colors.primary }]
-                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+                  ? styles.filterPillActive
+                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]
               ]}
               onPress={() => setFilterTab('all')}
+              activeOpacity={0.8}
             >
+              <Users size={16} color={filterTab === 'all' ? '#FFFFFF' : colors.text} strokeWidth={2.2} />
               <Text
                 style={[
                   styles.filterPillText,
-                  { color: filterTab === 'all' ? primaryBtnTextColor : colors.textMuted }
+                  filterTab === 'all' ? styles.filterPillTextActive : [styles.filterPillTextInactive, { color: colors.text }]
                 ]}
               >
                 All Groups
@@ -1060,8 +1640,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               style={[
                 styles.filterPill,
                 filterTab === 'joined'
-                  ? [styles.filterPillActive, { backgroundColor: colors.primary }]
-                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: colors.border }]
+                  ? styles.filterPillActive
+                  : [styles.filterPillInactive, { backgroundColor: colors.card, borderColor: theme === 'dark' ? colors.border : '#E2E8F0' }]
               ]}
               onPress={() => {
                 if (isGuest) {
@@ -1070,11 +1650,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                   setFilterTab('joined');
                 }
               }}
+              activeOpacity={0.8}
             >
+              <Check size={16} color={filterTab === 'joined' ? '#FFFFFF' : colors.primary} strokeWidth={2.4} />
               <Text
                 style={[
                   styles.filterPillText,
-                  { color: filterTab === 'joined' ? primaryBtnTextColor : colors.textMuted }
+                  filterTab === 'joined' ? styles.filterPillTextActive : [styles.filterPillTextInactive, { color: colors.text }]
                 ]}
               >
                 Joined
@@ -1082,7 +1664,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             </TouchableOpacity>
           </View>
 
-          {/* Vertical Community List */}
+          {/* Vertical Community List rendered as beautiful cards matching 4.png */}
           {loading && !refreshing ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -1090,8 +1672,12 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
           ) : (
             <FlatList<Community>
               data={filteredCommunities}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => (item?.id ? String(item.id) : `comm-${index}`)}
               contentContainerStyle={styles.verticalListContent}
+              initialNumToRender={12}
+              maxToRenderPerBatch={10}
+              windowSize={9}
+              removeClippedSubviews={Platform.OS === 'android'}
               refreshControl={
                 <RefreshControl
                   refreshing={refreshing}
@@ -1102,49 +1688,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                   tintColor={colors.primary}
                 />
               }
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[styles.whatsappRow, { borderBottomColor: colors.border + '40' }]}
-                  onPress={() => handleCommunityPress(item)}
-                  activeOpacity={0.7}
-                >
-                  {/* Circular Avatar with soft tint */}
-                  <View style={[styles.whatsappAvatar, { backgroundColor: getAvatarColor(item.id) + '22' }]}>
-                    <Text style={styles.whatsappAvatarEmoji}>{item.icon || '🔬'}</Text>
-                  </View>
-
-                  {/* Group Info & Preview */}
-                  <View style={styles.whatsappDetails}>
-                    <View style={styles.whatsappHeaderRow}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 6 }}>
-                        <Text style={[styles.whatsappName, { color: colors.text }]} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        {(item.isAdmin || (user && String(item.created_by) === String(user.id))) && (
-                          <View style={[styles.adminHeaderBadge, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}>
-                            <Shield size={9} color={colors.primary} />
-                            <Text style={[styles.adminHeaderBadgeText, { color: colors.primary }]}>Admin</Text>
-                          </View>
-                        )}
-                      </View>
-                      <Text style={[styles.whatsappMeta, { color: colors.textMuted }]}>
-                        {item.memberCount || 1} members
-                      </Text>
-                    </View>
-
-                    <View style={styles.whatsappSubRow}>
-                      <Text style={[styles.whatsappSnippet, { color: colors.textMuted }]} numberOfLines={1}>
-                        {item.description || 'Tap to enter group chat'}
-                      </Text>
-                      {item.isMember && (
-                        <View style={[styles.joinedBadgePill, { backgroundColor: colors.primary + '18' }]}>
-                          <Text style={[styles.joinedBadgeTextPill, { color: colors.primary }]}>Joined</Text>
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              )}
+              renderItem={renderCommunityItem}
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <Users size={48} color={colors.textMuted} />
@@ -1157,16 +1701,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             />
           )}
 
-          {/* Floating Action Button (FAB) matching reference */}
+          {/* Floating Action Button (FAB) matching reference 4.png */}
           <TouchableOpacity
-            style={[styles.whatsappFab, { backgroundColor: colors.primary }]}
+            style={[styles.whatsappFab, { backgroundColor: '#1363F5' }]}
             onPress={() => {
               if (isGuest) promptGuestSignIn();
               else setIsGroupModalOpen(true);
             }}
             activeOpacity={0.85}
           >
-            <Plus size={26} color={primaryBtnTextColor} />
+            <Plus size={26} color="#FFFFFF" strokeWidth={2.4} />
           </TouchableOpacity>
         </View>
       )}
@@ -1243,11 +1787,29 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
       </Modal>
 
       {/* Community Info & Admin Members Management Modal */}
-      <Modal visible={isInfoModalOpen} animationType="fade" transparent>
+      <Modal visible={isInfoModalOpen} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, styles.infoModalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+          <TouchableOpacity
+            style={styles.modalBackdropDismiss}
+            activeOpacity={1}
+            onPress={() => setIsInfoModalOpen(false)}
+          />
+          <View
+            style={[
+              styles.modalCard,
+              styles.infoModalCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                paddingBottom: Math.max(insets.bottom, 16) + 12,
+              },
+            ]}
+          >
+            {/* Top Sheet Drag Handle */}
+            <View style={[styles.bottomSheetHandle, { backgroundColor: colors.border }]} />
+
+            <View style={styles.infoModalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, marginRight: 8 }}>
                 <View style={[styles.modalIconBox, { backgroundColor: getAvatarColor(selectedCommunity?.id || '') + '25' }]}>
                   <Text style={styles.modalIconEmoji}>{selectedCommunity?.icon || '🔬'}</Text>
                 </View>
@@ -1260,14 +1822,19 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
                   </Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={() => setIsInfoModalOpen(false)} style={styles.modalCloseBtn}>
-                <X size={20} color={colors.text} />
+              <TouchableOpacity
+                onPress={() => setIsInfoModalOpen(false)}
+                style={[styles.modalCloseBtn, { backgroundColor: colors.background, borderColor: colors.border }]}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <X size={18} color={colors.text} />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
               {selectedCommunity?.description ? (
                 <View style={[styles.infoDescBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                  <Text style={[styles.infoDescLabel, { color: colors.textMuted }]}>About Group</Text>
                   <Text style={[styles.infoDescText, { color: colors.text }]}>
                     {selectedCommunity.description}
                   </Text>
@@ -1275,7 +1842,15 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               ) : null}
 
               {/* Admin status pill */}
-              <View style={[styles.roleStatusBanner, { backgroundColor: isCurrentUserAdmin ? colors.primary + '18' : colors.card, borderColor: isCurrentUserAdmin ? colors.primary : colors.border }]}>
+              <View
+                style={[
+                  styles.roleStatusBanner,
+                  {
+                    backgroundColor: isCurrentUserAdmin ? colors.primary + '15' : colors.background,
+                    borderColor: isCurrentUserAdmin ? colors.primary + '40' : colors.border,
+                  },
+                ]}
+              >
                 {isCurrentUserAdmin ? (
                   <>
                     <Shield size={16} color={colors.primary} />
@@ -1294,89 +1869,140 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
               </View>
 
               {/* Members List Section */}
-              <View style={{ marginTop: 14 }}>
-                <View style={styles.sectionTitleRow}>
-                  <Text style={[styles.infoSectionTitle, { color: colors.text }]}>
-                    Members ({selectedCommunity?.members?.length || selectedCommunity?.memberCount || 1})
-                  </Text>
-                </View>
-
-                {(selectedCommunity?.members || []).map((m: CommunityMemberInfo) => {
-                  const isSelf = user?.id === m.id;
-                  const isMemberAdmin = m.community_role === 'admin';
+              <View style={{ marginTop: 16 }}>
+                {(() => {
+                  let membersList = [...(selectedCommunity?.members || [])];
+                  if (membersList.length === 0 && user) {
+                    membersList.push({
+                      id: user.id,
+                      name: user.name || 'You',
+                      avatar_initials: user.avatar_initials || 'ME',
+                      community_role: isCurrentUserAdmin ? 'admin' : 'member',
+                      role: user.role || 'Researcher',
+                    });
+                  }
+                  if (selectedCommunity?.posts) {
+                    selectedCommunity.posts.forEach((p) => {
+                      const postAuthor = p.author;
+                      if (postAuthor && postAuthor.name && !membersList.some((m) => m.name === postAuthor.name)) {
+                        membersList.push({
+                          id: p.user_id || `user-${postAuthor.name}`,
+                          name: postAuthor.name,
+                          avatar_initials: postAuthor.avatar_initials || postAuthor.name.slice(0, 2).toUpperCase(),
+                          community_role: 'member',
+                          role: postAuthor.role || 'Contributor',
+                        });
+                      }
+                    });
+                  }
 
                   return (
-                    <View key={m.id} style={[styles.memberItemRow, { borderBottomColor: colors.border + '50' }]}>
-                      <View style={styles.memberLeftCol}>
-                        <View style={[styles.memberAvatar, { backgroundColor: colors.primary }]}>
-                          <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
-                            {m.avatar_initials || (m.name ? m.name.slice(0, 2).toUpperCase() : 'U')}
+                    <>
+                      <View style={styles.sectionHeaderBlock}>
+                        <View style={styles.sectionTitleRow}>
+                          <Text style={[styles.infoSectionTitle, { color: colors.text }]}>
+                            MEMBERS & ROLES
+                          </Text>
+                          <Text style={[styles.memberCountBadge, { color: colors.textMuted }]}>
+                            {membersList.length} {membersList.length === 1 ? 'member' : 'members'}
                           </Text>
                         </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
-                            {m.name || 'Researcher'} {isSelf ? '(You)' : ''}
-                          </Text>
-                          <Text style={[styles.memberSubtext, { color: colors.textMuted }]}>
-                            {m.role || 'Contributor'}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        {/* Role Badge */}
-                        <View
-                          style={[
-                            styles.roleBadgePill,
-                            isMemberAdmin
-                              ? { backgroundColor: colors.primary + '25', borderColor: colors.primary, borderWidth: 1 }
-                              : { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 }
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.roleBadgeText,
-                              { color: isMemberAdmin ? colors.primary : colors.textMuted }
-                            ]}
-                          >
-                            {isMemberAdmin ? 'Admin' : 'Member'}
-                          </Text>
-                        </View>
-
-                        {/* Admin Action: Promote / Demote */}
                         {isCurrentUserAdmin && (
-                          <TouchableOpacity
-                            style={[
-                              styles.roleActionBtn,
-                              { backgroundColor: isMemberAdmin ? '#ef444420' : colors.primary + '20', borderColor: isMemberAdmin ? '#ef444440' : colors.primary + '40' }
-                            ]}
-                            onPress={() => handleToggleMemberRole(m.id, m.community_role, m.name)}
-                          >
-                            {isMemberAdmin ? (
-                              <View style={styles.actionBtnInner}>
-                                <UserMinus size={12} color="#ef4444" />
-                                <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>
-                                  {isSelf ? 'Demote Self' : 'Demote'}
-                                </Text>
-                              </View>
-                            ) : (
-                              <View style={styles.actionBtnInner}>
-                                <UserCheck size={12} color={colors.primary} />
-                                <Text style={[styles.actionBtnText, { color: colors.primary }]}>Make Admin</Text>
-                              </View>
-                            )}
-                          </TouchableOpacity>
+                          <Text style={[styles.adminHintText, { color: colors.primary }]}>
+                            Admin: Tap to Promote / Demote
+                          </Text>
                         )}
                       </View>
-                    </View>
+
+                      {membersList.map((m: CommunityMemberInfo) => {
+                        const isSelf = user?.id === m.id;
+                        const isMemberAdmin = m.community_role === 'admin';
+
+                        return (
+                          <View key={m.id} style={[styles.memberItemRow, { borderBottomColor: colors.border + '40' }]}>
+                            <View style={styles.memberLeftCol}>
+                              <View style={[styles.memberAvatar, { backgroundColor: colors.primary }]}>
+                                <Text style={[styles.avatarText, { color: primaryBtnTextColor }]}>
+                                  {m.avatar_initials || (m.name ? m.name.slice(0, 2).toUpperCase() : 'U')}
+                                </Text>
+                              </View>
+                              <View style={{ flex: 1, marginRight: 8 }}>
+                                <Text style={[styles.memberName, { color: colors.text }]} numberOfLines={1}>
+                                  {m.name || 'Researcher'} {isSelf ? '(You)' : ''}
+                                </Text>
+                                <Text style={[styles.memberSubtext, { color: colors.textMuted }]} numberOfLines={1}>
+                                  {m.role || 'Contributor'}
+                                </Text>
+                              </View>
+                            </View>
+
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              {/* Admin badge */}
+                              {isMemberAdmin && (
+                                <View
+                                  style={[
+                                    styles.roleBadgePill,
+                                    { backgroundColor: colors.primary + '20', borderColor: colors.primary + '50', borderWidth: 1 },
+                                  ]}
+                                >
+                                  <Shield size={10} color={colors.primary} style={{ marginRight: 3 }} />
+                                  <Text style={[styles.roleBadgeText, { color: colors.primary }]}>Admin</Text>
+                                </View>
+                              )}
+
+                              {/* Regular member badge if viewer is NOT admin */}
+                              {!isMemberAdmin && !isCurrentUserAdmin && (
+                                <View
+                                  style={[
+                                    styles.roleBadgePill,
+                                    { backgroundColor: colors.background, borderColor: colors.border, borderWidth: 1 },
+                                  ]}
+                                >
+                                  <Text style={[styles.roleBadgeText, { color: colors.textMuted }]}>Member</Text>
+                                </View>
+                              )}
+
+                              {/* Admin Action: Promote / Demote */}
+                              {isCurrentUserAdmin && (
+                                <TouchableOpacity
+                                  style={[
+                                    styles.roleActionBtn,
+                                    {
+                                      backgroundColor: isMemberAdmin ? '#ef444418' : colors.primary + '18',
+                                      borderColor: isMemberAdmin ? '#ef444450' : colors.primary + '50',
+                                    },
+                                  ]}
+                                  onPress={() => handleToggleMemberRole(m.id, m.community_role, m.name)}
+                                  activeOpacity={0.7}
+                                >
+                                  {isMemberAdmin ? (
+                                    <View style={styles.actionBtnInner}>
+                                      <UserMinus size={12} color="#ef4444" />
+                                      <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>
+                                        {isSelf ? 'Demote Self' : 'Demote'}
+                                      </Text>
+                                    </View>
+                                  ) : (
+                                    <View style={styles.actionBtnInner}>
+                                      <UserCheck size={12} color={colors.primary} />
+                                      <Text style={[styles.actionBtnText, { color: colors.primary }]}>Make Admin</Text>
+                                    </View>
+                                  )}
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </>
                   );
-                })}
+                })()}
               </View>
 
               {/* Admin Actions: Delete Community */}
               {isCurrentUserAdmin && (
                 <TouchableOpacity
-                  style={styles.deleteCommunityBtn}
+                  style={[styles.deleteCommunityBtn, { marginTop: 24 }]}
                   onPress={handleDeleteCommunity}
                   activeOpacity={0.8}
                 >
@@ -1419,7 +2045,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onSelectPaper 
             ) : (
               <FlatList<Paper>
                 data={filteredSavedPapers}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, index) => (item?.id ? `${item.id}-${index}` : `saved-paper-${index}`)}
                 contentContainerStyle={{ paddingBottom: 20 }}
                 renderItem={({ item }) => (
                   <TouchableOpacity
@@ -1464,7 +2090,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // ── 1. Vertical WhatsApp-Style List Styles (Reference Screen 1) ───────────
+  // ── 1. Vertical Community List Styles matching reference 4.png ───────────
   verticalListWrapper: {
     flex: 1,
     position: 'relative',
@@ -1473,25 +2099,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 6,
+    position: 'relative',
+    minHeight: 52,
   },
   listHeaderGreeting: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: 1,
     letterSpacing: -0.2,
   },
   listHeaderTitle: {
     fontSize: 26,
     fontWeight: '800',
     letterSpacing: -0.5,
+    lineHeight: 30,
+  },
+  listHeaderSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 1,
   },
   listHeaderActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    zIndex: 10,
+  },
+  illustrationBackground: {
+    position: 'absolute',
+    right: 0,
+    top: -15,
+    opacity: 0.85,
+    zIndex: 1,
+    pointerEvents: 'none',
   },
   headerCircleBtn: {
     width: 38,
@@ -1500,115 +2142,207 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   listSearchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 20,
-    marginTop: 4,
-    marginBottom: 10,
+    marginHorizontal: 16,
+    marginTop: 2,
+    marginBottom: 8,
     paddingHorizontal: 14,
-    height: 42,
-    borderRadius: 21,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
   },
   listSearchInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13.5,
     paddingVertical: 0,
   },
   filterPillContainer: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 10,
     gap: 8,
   },
   filterPill: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
     borderRadius: 20,
-  },
-  filterPillActive: {},
-  filterPillInactive: {
     borderWidth: 1,
+  },
+  filterPillActive: {
+    backgroundColor: '#1363F5',
+    borderColor: '#1363F5',
+    shadowColor: '#1363F5',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  filterPillInactive: {
+    borderColor: '#E2E8F0',
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   filterPillText: {
     fontSize: 13,
+    fontWeight: '600',
+  },
+  filterPillTextActive: {
+    color: '#FFFFFF',
     fontWeight: '700',
+  },
+  filterPillTextInactive: {
+    color: '#64748B',
+    fontWeight: '600',
   },
   verticalListContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 90,
+    paddingHorizontal: 0,
+    paddingTop: 4,
+    paddingBottom: 24,
   },
-  whatsappRow: {
+  communityCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginBottom: 10,
+    padding: 14,
+    borderWidth: 1,
+    shadowColor: '#1A3B70',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
-  whatsappAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  communityAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    marginRight: 12,
   },
-  whatsappAvatarEmoji: {
-    fontSize: 24,
-  },
-  whatsappDetails: {
+  communityDetails: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
+    marginRight: 8,
   },
-  whatsappHeaderRow: {
+  communityTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    minWidth: 0,
+    marginBottom: 3,
+    gap: 6,
   },
-  whatsappName: {
-    fontSize: 16,
+  communityName: {
+    fontSize: 15.5,
     fontWeight: '700',
-    flex: 1,
-    marginRight: 8,
+    letterSpacing: -0.2,
+    flexShrink: 1,
   },
-  whatsappMeta: {
-    fontSize: 12,
-  },
-  whatsappSubRow: {
+  adminHeaderBadge: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    flexShrink: 0,
+    backgroundColor: '#EFF6FF',
+    borderColor: '#3B82F6',
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 8,
+    gap: 3,
   },
-  whatsappSnippet: {
-    fontSize: 13,
-    flex: 1,
-    marginRight: 8,
-  },
-  joinedBadgePill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  joinedBadgeTextPill: {
+  adminHeaderBadgeText: {
     fontSize: 10,
     fontWeight: '700',
+    color: '#2563EB',
+  },
+  communitySnippet: {
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
+  communityRightCol: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    minHeight: 44,
+  },
+  communityMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
+  },
+  communityMeta: {
+    fontSize: 11.5,
+    fontWeight: '500',
+  },
+  isMemberDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10B981',
+    marginRight: 4,
+  },
+  threeDotsBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  joinedBadgePill: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  joinedBadgeTextPill: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  joinActionBtn: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#2563EB',
+    borderWidth: 1.2,
+    paddingHorizontal: 14,
+    paddingVertical: 3.5,
+    borderRadius: 12,
+  },
+  joinActionBtnText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#2563EB',
   },
   whatsappFab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 20,
     right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+    shadowColor: '#1363F5',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
     elevation: 6,
   },
 
@@ -1626,6 +2360,8 @@ const styles = StyleSheet.create({
   },
   chatHeaderClickableArea: {
     flex: 1,
+    minWidth: 0,
+    marginRight: 8,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -1636,19 +2372,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  adminHeaderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: 3,
-  },
-  adminHeaderBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
   },
   chatHeaderAvatar: {
     width: 40,
@@ -1663,12 +2386,20 @@ const styles = StyleSheet.create({
   },
   chatHeaderDetails: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
+  },
+  chatHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 0,
+    gap: 6,
   },
   chatHeaderTitle: {
     fontSize: 16,
     fontWeight: '700',
     letterSpacing: -0.2,
+    flexShrink: 1,
   },
   chatHeaderStatusRow: {
     flexDirection: 'row',
@@ -2003,19 +2734,44 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     fontSize: 13,
   },
+  modalBackdropDismiss: {
+    ...StyleSheet.absoluteFill,
+  },
   infoModalCard: {
-    width: '92%',
+    width: '100%',
     maxHeight: '85%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  bottomSheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 14,
+  },
+  infoModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 14,
+    marginBottom: 4,
   },
   modalIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalIconEmoji: {
-    fontSize: 20,
+    fontSize: 22,
   },
   infoModalSub: {
     fontSize: 12,
@@ -2023,9 +2779,16 @@ const styles = StyleSheet.create({
   },
   infoDescBox: {
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
     marginBottom: 12,
+  },
+  infoDescLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
   infoDescText: {
     fontSize: 13,
@@ -2035,30 +2798,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
     gap: 8,
   },
   roleStatusText: {
     fontSize: 13,
   },
+  sectionHeaderBlock: {
+    marginBottom: 10,
+    marginTop: 2,
+  },
   sectionTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
   },
   infoSectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  memberCountBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  adminHintText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 3,
   },
   memberItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderBottomWidth: 1,
   },
   memberLeftCol: {
@@ -2068,9 +2842,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   memberAvatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 10,
@@ -2084,8 +2858,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   roleBadgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 12,
   },
   roleBadgeText: {
@@ -2093,8 +2869,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   roleActionBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
   },
@@ -2111,8 +2887,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 13,
+    borderRadius: 10,
     backgroundColor: '#ef444415',
     borderColor: '#ef444435',
     borderWidth: 1,

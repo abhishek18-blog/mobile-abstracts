@@ -7,6 +7,81 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+async function sendCommunityPushNotifications({ community, targetCommunityId, senderId, senderName, sanitizedContent, hasAttachment }) {
+  try {
+    const members = await CommunityMember.find({
+      community_id: targetCommunityId,
+      user_id: { $ne: senderId },
+    }).select('user_id').lean();
+
+    if (!members || members.length === 0) return;
+
+    const memberIds = members.map(m => m.user_id);
+    const recipients = await User.find({
+      _id: { $in: memberIds },
+      pushTokens: { $exists: true, $ne: [] },
+    }).select('_id pushTokens').lean();
+
+    const tokens = [];
+    for (const u of recipients) {
+      for (const t of (u.pushTokens || [])) {
+        if (typeof t === 'string' && t.startsWith('ExponentPushToken[')) {
+          tokens.push({ userId: u._id, token: t });
+        }
+      }
+    }
+    if (tokens.length === 0) return;
+
+    const isEncrypted = typeof sanitizedContent === 'string' && sanitizedContent.startsWith('E2EE:');
+    const bodyText = isEncrypted
+      ? (hasAttachment ? '📎 Shared a research paper' : 'Sent a new message')
+      : (hasAttachment ? `${sanitizedContent ? sanitizedContent + ' ' : ''}📎 Attached a research paper` : (sanitizedContent || 'Sent a new message'));
+
+    const messages = tokens.map(({ token }) => ({
+      to: token,
+      sound: 'default',
+      title: `${senderName} in ${community.name}`,
+      body: bodyText.slice(0, 180),
+      channelId: 'community-messages',
+      priority: 'high',
+      data: {
+        communityId: targetCommunityId,
+        screen: 'Community',
+      },
+    }));
+
+    // Expo Push API accepts batches of up to 100 messages
+    for (let i = 0; i < messages.length; i += 100) {
+      const chunk = messages.slice(i, i + 100);
+      const tokenChunk = tokens.slice(i, i + 100);
+      const response = await fetch('https://exp.host/--/api/v2/push/send', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Accept-encoding': 'gzip, deflate',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(chunk),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const tickets = Array.isArray(result?.data) ? result.data : [];
+        for (let j = 0; j < tickets.length; j++) {
+          if (tickets[j]?.status === 'error' && tickets[j]?.details?.error === 'DeviceNotRegistered') {
+            const dead = tokenChunk[j];
+            if (dead) {
+              User.findByIdAndUpdate(dead.userId, { $pull: { pushTokens: dead.token } }).catch(() => {});
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[Push] Failed to send community push notifications:', err?.message);
+  }
+}
+
 export const getAllCommunities = async (req, res) => {
   try {
     const { search, subject } = req.query;
@@ -206,7 +281,16 @@ export const createCommunity = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      data: { ...community.toJSON(), memberCount: 1, postCount: 0, isMember: true },
+      data: {
+        ...community.toJSON(),
+        id: community._id,
+        _id: community._id,
+        memberCount: 1,
+        postCount: 0,
+        isMember: true,
+        isAdmin: true,
+        posts: [],
+      },
     });
   } catch (error) {
     console.error('Error creating community:', error);
@@ -460,15 +544,44 @@ export const createPost = async (req, res) => {
     await post.save();
 
     const author = await User.findById(req.userId);
-    const papers = paper_ids && paper_ids.length > 0 ? await Paper.find({ _id: { $in: paper_ids } }) : [];
+    const validPaperObjectIds = (paper_ids || []).filter(id => mongoose.Types.ObjectId.isValid(id));
+    const papers = validPaperObjectIds.length > 0 ? await Paper.find({ _id: { $in: validPaperObjectIds } }) : [];
+
+    const postPayload = {
+      ...post.toJSON(),
+      id: post._id,
+      _id: post._id,
+      author: author ? { name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role } : null,
+      papers: papers.map(paper => paper ? {
+        id: paper._id,
+        _id: paper._id,
+        title: paper.title,
+        authors: paper.authors || [],
+        year: paper.year || '2024',
+        citations: paper.citations || 0,
+        tags: paper.tags || ['Research'],
+        abstract: paper.abstract || '',
+      } : null).filter(Boolean),
+    };
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`community:${targetCommunityId}`).emit('new_post', postPayload);
+    }
+
+    // Send remote push notifications to all other community members (works even when app is closed)
+    sendCommunityPushNotifications({
+      community,
+      targetCommunityId: String(targetCommunityId),
+      senderId: String(req.userId),
+      senderName: author?.name || 'Researcher',
+      sanitizedContent,
+      hasAttachment: Array.isArray(paper_ids) && paper_ids.length > 0,
+    }).catch(err => console.warn('[Push] Error dispatching community push:', err?.message));
 
     res.status(201).json({
       success: true,
-      data: {
-        ...post.toJSON(),
-        author: author ? { name: author.name, avatar_initials: author.avatar_initials, avatar_url: author.avatar_url, role: author.role } : null,
-        papers: papers.map(paper => paper ? { id: paper._id, title: paper.title, authors: paper.authors, year: paper.year, citations: paper.citations } : null).filter(Boolean),
-      },
+      data: postPayload,
     });
   } catch (error) {
     console.error('Error creating post:', error);
@@ -490,6 +603,15 @@ export const deletePost = async (req, res) => {
     }
 
     await CommunityPost.deleteOne({ _id: post._id });
+
+    const io = req.app.get('io');
+    if (io && post.community_id) {
+      io.to(`community:${post.community_id}`).emit('delete_post', {
+        communityId: String(post.community_id),
+        postId: String(post._id),
+      });
+    }
+
     res.json({ success: true, message: 'Post deleted' });
   } catch (error) {
     console.error('Error deleting post:', error);
